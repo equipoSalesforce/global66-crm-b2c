@@ -1,0 +1,119 @@
+-- Base portable de templates de correo para CRM.
+-- TODO AWS: mantener estas tablas en RDS/Aurora PostgreSQL y renderizar desde FastAPI.
+
+create table if not exists public.email_template_folders (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  parent_id uuid null references public.email_template_folders(id) on delete set null,
+  description text null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.email_templates (
+  id uuid primary key default gen_random_uuid(),
+  folder_id uuid null references public.email_template_folders(id) on delete set null,
+  name text not null,
+  description text null,
+  channel text not null default 'EMAIL',
+  template_type text not null default 'HTML',
+  subject text null,
+  html_body text null,
+  text_body text null,
+  variables jsonb not null default '[]'::jsonb,
+  tags jsonb not null default '[]'::jsonb,
+  is_active boolean not null default true,
+  is_default_ai_template boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists email_template_folders_parent_id_idx on public.email_template_folders(parent_id);
+create index if not exists email_templates_folder_id_idx on public.email_templates(folder_id);
+create index if not exists email_templates_default_ai_idx on public.email_templates(is_default_ai_template) where is_default_ai_template = true;
+create index if not exists email_templates_active_idx on public.email_templates(is_active);
+
+insert into public.email_template_folders (name, description, is_active)
+select folder_name, folder_description, true
+from (values
+  ('General', 'Templates generales de soporte.'),
+  ('CX', 'Comunicaciones de experiencia de clientes.'),
+  ('Transferencias', 'Respuestas para operaciones y transferencias.'),
+  ('Compliance', 'Comunicaciones de revisión y cumplimiento.'),
+  ('B2B', 'Templates para empresas y cuentas B2B.')
+) as folders(folder_name, folder_description)
+where not exists (
+  select 1 from public.email_template_folders existing where existing.name = folders.folder_name
+);
+
+with folder as (
+  select id from public.email_template_folders where name = 'CX' order by created_at asc limit 1
+)
+insert into public.email_templates (
+  folder_id, name, description, channel, template_type, subject, html_body, text_body, variables, tags, is_active, is_default_ai_template
+)
+select
+  folder.id,
+  'Respuesta IA - Global66',
+  'Template corporativo por defecto para correos sugeridos por IA.',
+  'EMAIL',
+  'HTML',
+  '{{case.subject}}',
+  $template$
+<!DOCTYPE html><html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en"><head><title></title><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><!--[if mso]>
+<xml><w:WordDocument xmlns:w="urn:schemas-microsoft-com:office:word"><w:DontUseAdvancedTypographyReadingMail/></w:WordDocument>
+<o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch><o:AllowPNG/></o:OfficeDocumentSettings></xml>
+<![endif]--><!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@100;400;700;900&amp;display=swap" rel="stylesheet" type="text/css"><!--<![endif]--><style>
+*{box-sizing:border-box}body{margin:0;padding:0}a[x-apple-data-detectors]{color:inherit!important;text-decoration:inherit!important}#MessageViewBody a{color:inherit;text-decoration:none}p{line-height:inherit}.desktop_hide,.desktop_hide table{mso-hide:all;display:none;max-height:0;overflow:hidden}.image_block img+div{display:none}sub,sup{font-size:75%;line-height:0} @media (max-width:620px){.mobile_hide{display:none}.row-content{width:100%!important}.stack .column{width:100%;display:block}.mobile_hide{min-height:0;max-height:0;max-width:0;overflow:hidden;font-size:0}.desktop_hide,.desktop_hide table{display:table!important;max-height:none!important}}
+</style><!--[if mso ]><style>sup, sub { font-size: 100% !important; } sup { mso-text-raise:10% } sub { mso-text-raise:-10% }</style> <![endif]--></head><body class="body" style="margin:0;background-color:#fff;padding:0;-webkit-text-size-adjust:none;text-size-adjust:none"><table class="nl-container" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0;background-color:#fff"><tbody><tr><td><table class="row row-1" align="center" 
+width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tbody><tr><td><table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0;background-color:#fff;border-radius:0;color:#000;width:600px;margin:0 auto" width="600"><tbody><tr><td class="column column-1" width="100%" 
+style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;vertical-align:top"><table class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" style="width:100%"><div class="alignment" align="center"><div style="max-width:600px"><a href="https://global66.com/" target="_blank"><img 
+src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/CX%20-%20HEADER%20PARA%20TODAS%20LAS%20COMMS%20%281%29_1.png" style="display:block;height:auto;border:0;width:100%" width="600" alt="Global66" title="Global66" height="auto"></a></div></div></td></tr></table><table class="text_block block-2" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" 
+style="mso-table-lspace:0;mso-table-rspace:0;word-break:break-word"><tr><td class="pad" style="padding-bottom:10px;padding-left:15px;padding-right:15px;padding-top:10px"><div style="font-family:sans-serif"><div class style="font-size:14px;font-family:Montserrat,Trebuchet MS,Lucida Grande,Lucida Sans Unicode,Lucida Sans,Tahoma,sans-serif;mso-line-height-alt:21px;color:#555;line-height:1.5">{{email.body}}</div></div></td></tr></table><table class="divider_block block-3" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad"><div class="alignment" align="center"><table
+ border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="divider_inner" style="font-size:1px;line-height:1px;border-top:1px solid #5d65ac"><span style="word-break: break-word;">&#8202;</span></td></tr></table></div></td></tr></table></td></tr></tbody></table></td></tr></tbody></table><table class="row row-2" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" 
+style="mso-table-lspace:0;mso-table-rspace:0"><tbody><tr><td><table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0;background-color:#1433b4;border-radius:0;color:#000;width:600px;margin:0 auto" width="600"><tbody><tr><td class="column column-1" width="100%" style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-top:20px;vertical-align:top"><table 
+class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" style="padding-bottom:5px;padding-top:10px;width:100%;padding-right:0;padding-left:0"><div class="alignment" align="center"><div style="max-width:120px"><img src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/S%C3%A9%20Global%20%2810%29.png" 
+style="display:block;height:auto;border:0;width:100%" width="120" alt="Global66" title="Global66" height="auto"></div></div></td></tr></table></td></tr></tbody></table></td></tr></tbody></table><table class="row row-3" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tbody><tr><td><table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" 
+style="mso-table-lspace:0;mso-table-rspace:0;background-color:#1433b4;border-radius:0;color:#000;width:600px;margin:0 auto" width="600"><tbody><tr><td class="column column-1" width="100%" style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-top:5px;vertical-align:top"><table class="text_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0;word-break:break-word"><tr><td class="pad" 
+style="padding-bottom:5px;padding-left:10px;padding-right:10px"><div style="font-family:sans-serif"><div class style="font-size:14px;font-family:Montserrat,Trebuchet MS,Lucida Grande,Lucida Sans Unicode,Lucida Sans,Tahoma,sans-serif;mso-line-height-alt:16.8px;color:#555;line-height:1.2"><p style="margin:0;font-size:14px;text-align:center;mso-line-height-alt:16.8px">&nbsp;</p><p style="margin:0;font-size:14px;text-align:center;mso-line-height-alt:16.8px">
+<span style="word-break: break-word; color: #ffffff; font-size: 16px;">¿Tienes dudas?</span></p></div></div></td></tr></table></td></tr></tbody></table></td></tr></tbody></table><table class="row row-4" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tbody><tr><td><table class="row-content" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" 
+style="mso-table-lspace:0;mso-table-rspace:0;background-color:#1433b4;border-radius:0;color:#000;width:600px;margin:0 auto" width="600"><tbody><tr><td class="column column-1" width="50%" style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-bottom:20px;padding-top:5px;vertical-align:top"><table class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" 
+style="padding-left:25px;padding-right:20px;width:100%"><div class="alignment" align="right"><div style="max-width:165px"><a href="https://ayuda.global66.com/" target="_blank"><img src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/Boton%20centro%20de%20ayuda%20mail.png" style="display:block;height:auto;border:0;width:100%" width="165" alt="Centro de ayuda" title="Centro de ayuda" 
+height="auto"></a></div></div></td></tr></table></td><td class="column column-2" width="50%" style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-bottom:5px;padding-top:5px;vertical-align:top"><table class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" style="padding-left:20px;padding-right:25px;width:100%"><div class="alignment" align="left"><div 
+style="max-width:165px"><a href="https://api.whatsapp.com/send/?phone=56233048905&text=Hola,%20necesito%20ayuda&type=phone_number&app_absent=0" target="_blank"><img src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/Group%201596000%20%282%29.png" style="display:block;height:auto;border:0;width:100%" width="165" alt="Whatsapp" title="Whatsapp" height="auto"></a></div></div></td></tr></table></td></tr></tbody></table></td></tr></tbody></table><table class="row row-5" 
+align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tbody><tr><td><table class="row-content" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0;background-color:#1433b4;border-radius:0;color:#000;width:600px;margin:0 auto" width="600"><tbody><tr><td class="column column-1" width="50%" 
+style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-bottom:45px;padding-top:5px;vertical-align:top"><table class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" style="padding-left:20px;padding-right:20px;width:100%"><div class="alignment" align="right"><div style="max-width:120px">
+<a href="https://play.google.com/store/apps/details?id=com.global66.cards" target="_blank"><img src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/Badge%20%283%29_1.png" style="display:block;height:auto;border:0;width:100%" width="120" alt="Play Store" title="Play Store" height="auto"></a></div></div></td></tr></table></td><td class="column column-2" width="50%" 
+style="mso-table-lspace:0;mso-table-rspace:0;font-weight:400;text-align:left;padding-bottom:5px;padding-top:5px;vertical-align:top"><table class="image_block block-1" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace:0;mso-table-rspace:0"><tr><td class="pad" style="padding-left:20px;padding-right:20px;width:100%"><div class="alignment" align="left"><div style="max-width:120px">
+<a href="https://apps.apple.com/app/global66/id1494957339" target="_blank"><img src="https://d15k2d11r6t6rl.cloudfront.net/public/users/Integrators/669d5713-9b6a-46bb-bd7e-c542cff6dd6a/8dbefaeb68e34c0da3aed8fbd33d2923/Badge%20%284%29_1.png" style="display:block;height:auto;border:0;width:100%" width="120" alt="App Store" title="App Store" height="auto"></a></div></div></td></tr></table></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table><!-- End --></body></html>
+$template$,
+  '{{email.body}}',
+  '["customer.name","customer.email","customer.phone","case.case_number","case.subject","case.status","case.priority","case.channel","agent.name","agent.email","email.body"]'::jsonb,
+  '["global66","ai","default","cx"]'::jsonb,
+  true,
+  true
+from folder
+where not exists (select 1 from public.email_templates where name = 'Respuesta IA - Global66');
+
+alter table public.email_template_folders enable row level security;
+alter table public.email_templates enable row level security;
+
+drop policy if exists "email_template_folders_demo_select" on public.email_template_folders;
+drop policy if exists "email_templates_demo_select" on public.email_templates;
+drop policy if exists "email_template_folders_demo_write" on public.email_template_folders;
+drop policy if exists "email_templates_demo_write" on public.email_templates;
+
+create policy "email_template_folders_demo_select" on public.email_template_folders for select using (true);
+create policy "email_templates_demo_select" on public.email_templates for select using (true);
+create policy "email_template_folders_demo_write" on public.email_template_folders for all using (true) with check (true);
+create policy "email_templates_demo_write" on public.email_templates for all using (true) with check (true);
+
+grant select, insert, update, delete on public.email_template_folders to anon, authenticated;
+grant select, insert, update, delete on public.email_templates to anon, authenticated;
+
+do $$
+begin
+  perform pg_notify('pgrst', 'reload schema');
+exception when others then null;
+end $$;

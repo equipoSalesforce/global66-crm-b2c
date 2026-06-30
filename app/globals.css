@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+:root {
+  --g66-brand-blue: #205EF1;
+  --g66-brand-blue-hover: #174EE0;
+  --g66-brand-blue-dark: #0B2A66;
+  --g66-brand-blue-soft: #EAF1FF;
+  --g66-accent-green: #16C784;
+  --g66-accent-green-soft: #E8FAF1;
+  --g66-accent-cyan: #21A8E8;
+  --g66-accent-purple: #8B5CF6;
+  --g66-accent-purple-soft: var(--g66-accent-purple-soft);
+  --g66-success: #16C784;
+  --g66-success-soft: #E8FAF1;
+  --g66-warning: #FFB020;
+  --g66-warning-soft: #FFF5D9;
+  --g66-warning-text: #B77900;
+  --g66-danger: #FF4D4F;
+  --g66-danger-soft: #FFECEC;
+  --g66-info: #205EF1;
+  --g66-info-soft: #EAF1FF;
+  --g66-background: #F7FAFF;
+  --g66-background-soft: #EEF6FF;
+  --g66-surface: #FFFFFF;
+  --g66-surface-soft: #F8FBFF;
+  --g66-sidebar-bg: #FFFFFF;
+  --g66-text-primary: #10213F;
+  --g66-text-secondary: #52627A;
+  --g66-text-muted: #7A8AA0;
+  --g66-text-inverse: #FFFFFF;
+  --g66-border: #DDE7F3;
+  --g66-border-soft: #EAF0F7;
+  --g66-shadow-soft: 0 10px 30px rgba(16, 33, 63, 0.08);
+  --g66-shadow-card: 0 6px 18px rgba(16, 33, 63, 0.06);
+  --g66-radius-sm: 10px;
+  --g66-radius-md: 14px;
+  --g66-radius-lg: 18px;
+  --g66-radius-xl: 24px;
+  --brand-primary: var(--g66-brand-blue);
+  --brand-primary-hover: var(--g66-brand-blue-hover);
+  --brand-secondary: var(--g66-accent-cyan);
+  --brand-accent: var(--g66-accent-green);
+  --brand-background: var(--g66-background);
+  --brand-background-start: var(--g66-background);
+  --brand-background-end: var(--g66-background-soft);
+  --brand-surface: var(--g66-surface);
+  --brand-surface-soft: var(--g66-surface-soft);
+  --brand-border: var(--g66-border);
+  --brand-text: var(--g66-text-primary);
+  --brand-muted: var(--g66-text-secondary);
+  --status-success: var(--g66-success);
+  --status-warning: var(--g66-warning-text);
+  --status-warning-bright: var(--g66-warning);
+  --status-danger: var(--g66-danger);
+  --status-danger-deep: #D9363E;
+  --status-danger-bright: var(--g66-danger);
+  --status-info: var(--g66-info);
+  --status-success-soft: var(--g66-success-soft);
+  --status-warning-soft: var(--g66-warning-soft);
+  --status-danger-soft: var(--g66-danger-soft);
+  --status-info-soft: var(--g66-info-soft);
+  --shadow-surface: var(--g66-shadow-card);
+  --background: var(--g66-background);
+  --foreground: var(--g66-text-primary);
+}
+
+@theme inline {
+  --color-g66-brand-blue: var(--g66-brand-blue);
+  --color-g66-brand-blue-hover: var(--g66-brand-blue-hover);
+  --color-g66-brand-blue-dark: var(--g66-brand-blue-dark);
+  --color-g66-brand-blue-soft: var(--g66-brand-blue-soft);
+  --color-g66-accent-green: var(--g66-accent-green);
+  --color-g66-accent-green-soft: var(--g66-accent-green-soft);
+  --color-g66-accent-cyan: var(--g66-accent-cyan);
+  --color-g66-accent-purple: var(--g66-accent-purple);
+  --color-g66-accent-purple-soft: var(--g66-accent-purple-soft);
+  --color-g66-background: var(--g66-background);
+  --color-g66-background-soft: var(--g66-background-soft);
+  --color-g66-surface: var(--g66-surface);
+  --color-g66-surface-soft: var(--g66-surface-soft);
+  --color-g66-sidebar-bg: var(--g66-sidebar-bg);
+  --color-g66-border: var(--g66-border);
+  --color-g66-border-soft: var(--g66-border-soft);
+  --color-g66-text-primary: var(--g66-text-primary);
+  --color-g66-text-secondary: var(--g66-text-secondary);
+  --color-g66-text-muted: var(--g66-text-muted);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-primary-hover: var(--brand-primary-hover);
+  --color-brand-secondary: var(--brand-secondary);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-background: var(--brand-background);
+  --color-brand-background-start: var(--brand-background-start);
+  --color-brand-background-end: var(--brand-background-end);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-surface-soft: var(--brand-surface-soft);
+  --color-brand-border: var(--brand-border);
+  --color-brand-text: var(--brand-text);
+  --color-brand-muted: var(--brand-muted);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bright: var(--status-warning-bright);
+  --color-status-danger: var(--status-danger);
+  --color-status-danger-deep: var(--status-danger-deep);
+  --color-status-danger-bright: var(--status-danger-bright);
+  --color-status-info: var(--status-info);
+  --color-status-success-soft: var(--status-success-soft);
+  --color-status-warning-soft: var(--status-warning-soft);
+  --color-status-danger-soft: var(--status-danger-soft);
+  --color-status-info-soft: var(--status-info-soft);
+  --font-sans: "Manrope", "DM Sans", "Inter", var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--g66-background);
+    --foreground: var(--g66-text-primary);
+  }
+}
+
+body {
+  background:
+    radial-gradient(circle at bottom left, rgb(32 94 241 / 0.1), transparent 30rem),
+    linear-gradient(135deg, var(--g66-background) 0%, var(--g66-background-soft) 100%);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  .crm-card,
+  .g66-card {
+    border: 1px solid var(--g66-border);
+    border-radius: var(--g66-radius-lg);
+    background: var(--g66-surface);
+    box-shadow: var(--g66-shadow-card);
+  }
+
+  .crm-panel,
+  .g66-panel {
+    border: 1px solid var(--g66-border);
+    border-radius: var(--g66-radius-md);
+    background: var(--g66-surface);
+  }
+
+  .crm-button-primary,
+  .g66-button-primary {
+    background: var(--g66-brand-blue);
+    color: var(--g66-text-inverse);
+    transition:
+      background-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .crm-button-primary:hover,
+  .g66-button-primary:hover {
+    background: var(--g66-brand-blue-hover);
+    box-shadow: 0 10px 22px rgb(32 94 241 / 0.22);
+  }
+
+  .crm-button-secondary,
+  .g66-button-secondary {
+    border: 1px solid var(--g66-border);
+    background: var(--g66-surface);
+    color: var(--g66-text-primary);
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .crm-button-secondary:hover,
+  .g66-button-secondary:hover {
+    border-color: var(--g66-brand-blue);
+    background: var(--g66-brand-blue-soft);
+  }
+
+  .crm-button-danger,
+  .g66-button-danger {
+    background: var(--g66-danger);
+    color: white;
+  }
+
+  .crm-input,
+  .g66-input {
+    border: 1px solid var(--g66-border);
+    border-radius: var(--g66-radius-md);
+    background: var(--g66-surface);
+    color: var(--g66-text-primary);
+  }
+
+  .crm-input:focus,
+  .g66-input:focus {
+    border-color: var(--g66-brand-blue);
+    box-shadow: 0 0 0 3px rgb(32 94 241 / 0.12);
+    outline: none;
+  }
+
+  .crm-table-head,
+  .g66-table-head {
+    background: var(--g66-surface-soft);
+    color: var(--g66-text-secondary);
+  }
+
+  .crm-badge-info {
+    background: var(--g66-info-soft);
+    color: var(--g66-info);
+  }
+
+  .crm-badge-success {
+    background: var(--g66-success-soft);
+    color: var(--g66-success);
+  }
+
+  .crm-badge-warning {
+    background: var(--g66-warning-soft);
+    color: var(--g66-warning-text);
+  }
+
+  .crm-badge-danger {
+    background: var(--g66-danger-soft);
+    color: var(--g66-danger);
+  }
+
+  .g66-logo-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--g66-brand-blue);
+    color: var(--g66-text-inverse);
+    box-shadow: 0 12px 24px rgb(32 94 241 / 0.24);
+  }
+}
