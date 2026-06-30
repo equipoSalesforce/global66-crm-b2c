@@ -16,6 +16,19 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Docker
+
+Build the production image and run it locally:
+
+```bash
+docker build -t global66-crm-b2c .
+docker run --rm -p 3000:3000 global66-crm-b2c
+```
+
+Open [http://localhost:3000](http://localhost:3000). Runtime configuration can be
+passed to `docker run` by the deployment environment; do not bake secrets into the
+image.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
