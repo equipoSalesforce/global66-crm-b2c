@@ -23,4 +23,17 @@ Prueba los endpoints:
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/customers/demo-customer/summary
+curl http://localhost:8000/cases
+curl http://localhost:8000/cases/demo-case-001
 ```
+
+La lista acepta los filtros `status`, `lifecycle_status`, `routing_status`,
+`assigned_agent_id`, `customer_id` y `channel`, además de paginación con `limit`
+y `offset`. Por ejemplo:
+
+```bash
+curl "http://localhost:8000/cases?status=ASSIGNED&channel=WHATSAPP&limit=20&offset=0"
+```
+
+Los endpoints de Casos usan datos mock en esta etapa y no requieren credenciales
+ni conexiones a Supabase o Redshift.
