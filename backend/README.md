@@ -35,5 +35,29 @@ y `offset`. Por ejemplo:
 curl "http://localhost:8000/cases?status=ASSIGNED&channel=WHATSAPP&limit=20&offset=0"
 ```
 
-Los endpoints de Casos usan datos mock en esta etapa y no requieren credenciales
-ni conexiones a Supabase o Redshift.
+## Fuente de datos de Casos
+
+El modo mock está activo por defecto y no requiere credenciales:
+
+```dotenv
+CASES_USE_MOCK_DATA=true
+```
+
+Para habilitar lectura real desde Supabase, configura estas variables en tu
+archivo local `backend/.env` y reinicia Uvicorn:
+
+```dotenv
+CASES_USE_MOCK_DATA=false
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+No agregues valores reales al repositorio. Si falta la URL o la clave, Casos usa
+automáticamente el repositorio mock aunque `CASES_USE_MOCK_DATA` sea `false`.
+Cuando el modo real está correctamente configurado, una falla de Supabase genera
+una respuesta controlada `502`; no cambia silenciosamente a datos mock.
+
+La lectura real consulta los campos definidos por `CaseSummary` y `CaseDetail`,
+incluida la relación `customer:customers(name,email,phone)`. Los campos ausentes o
+nulos en un registro se devuelven como `null`, excepto `id`, que es obligatorio y
+se normaliza como texto. Esta etapa no consulta Redshift ni habilita mutaciones.

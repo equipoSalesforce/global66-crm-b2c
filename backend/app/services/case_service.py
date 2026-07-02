@@ -1,6 +1,6 @@
 from typing import Optional
 
-from app.repositories.case_repository import CaseRepository, MockCaseRepository
+from app.repositories.case_repository import CaseRepository, create_case_repository
 from app.schemas.case import (
     CaseDetail,
     CaseFilters,
@@ -12,11 +12,13 @@ from app.schemas.case import (
 
 class CaseService:
     def __init__(self, repository: Optional[CaseRepository] = None) -> None:
-        self._repository = repository or MockCaseRepository()
+        self._repository = repository or create_case_repository()
 
     def list_cases(self, filters: CaseFilters) -> CaseListResponse:
-        cases, total = self._repository.list(filters)
-        items = [CaseSummary.model_validate(case_item.model_dump()) for case_item in cases]
+        cases, total = self._repository.list_cases(filters)
+        items = [
+            CaseSummary.model_validate(case_item.model_dump()) for case_item in cases
+        ]
 
         return CaseListResponse(
             items=items,
@@ -30,4 +32,4 @@ class CaseService:
         )
 
     def get_case(self, case_id: str) -> Optional[CaseDetail]:
-        return self._repository.get_by_id(case_id)
+        return self._repository.get_case_by_id(case_id)
