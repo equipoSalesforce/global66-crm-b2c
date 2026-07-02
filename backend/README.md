@@ -25,6 +25,8 @@ curl http://localhost:8000/health
 curl http://localhost:8000/customers/demo-customer/summary
 curl http://localhost:8000/cases
 curl http://localhost:8000/cases/demo-case-001
+curl http://localhost:8000/accounts/demo-account/360
+curl http://localhost:8000/accounts/demo-account/products/card
 ```
 
 La lista acepta los filtros `status`, `lifecycle_status`, `routing_status`,
@@ -61,3 +63,48 @@ La lectura real consulta los campos definidos por `CaseSummary` y `CaseDetail`,
 incluida la relación `customer:customers(name,email,phone)`. Los campos ausentes o
 nulos en un registro se devuelven como `null`, excepto `id`, que es obligatorio y
 se normaliza como texto. Esta etapa no consulta Redshift ni habilita mutaciones.
+
+## Account 360
+
+Account 360 usa un mock completo por defecto, sin conectarse a AWS ni Redshift:
+
+```dotenv
+ACCOUNT_360_USE_MOCK_DATA=true
+```
+
+Para habilitar el perfil base desde Redshift Data API, configura localmente:
+
+```dotenv
+ACCOUNT_360_USE_MOCK_DATA=false
+AWS_REGION=
+REDSHIFT_ACCESS_MODE=data_api
+REDSHIFT_CLUSTER_IDENTIFIER=
+REDSHIFT_DATABASE=
+REDSHIFT_SECRET_ARN=
+REDSHIFT_DATA_API_POLL_INTERVAL_SECONDS=0.5
+REDSHIFT_DATA_API_TIMEOUT_SECONDS=30
+```
+
+`REDSHIFT_SECRET_ARN` puede quedar vacío cuando la identidad AWS activa está
+autorizada para usar credenciales temporales del cluster. Las credenciales AWS se
+resuelven mediante la cadena estándar de `boto3` y nunca deben guardarse en el
+repositorio. Si falta la configuración esencial o no hay credenciales disponibles,
+Account 360 mantiene el mock. Otros errores de Data API devuelven un `502`
+controlado sin exponer detalles sensibles.
+
+La primera consulta real usa `customer.customer` y filtra `customer_id` mediante
+un parámetro de Redshift Data API. Como las columnas finales aún deben confirmarse,
+`account_360_repository.py` contiene `CUSTOMER_COLUMN_MAP` con nombres candidatos.
+El resultado real reemplaza solo los datos de perfil que estén presentes; el resto
+de la vista sigue siendo mock y se identifica con `data_source=redshift_partial`.
+
+Ejemplos:
+
+```bash
+curl http://localhost:8000/accounts/demo-account/360
+curl http://localhost:8000/accounts/demo-account/products/card
+```
+
+Los módulos de Remesa, P2P, Exchange, Tarjeta, Pagos y Compras tarjeta se
+conectarán progresivamente a sus propios schemas. El endpoint de detalle ya separa
+cada producto mediante `product_code`, sin asumir un schema global único.
