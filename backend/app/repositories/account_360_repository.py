@@ -1,12 +1,12 @@
+import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Protocol, Sequence
+from typing import Any, Dict, Optional, Protocol
 
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
 from app.repositories.redshift_data_api_client import (
     RedshiftDataApiClient,
-    RedshiftDataApiCredentialsError,
     RedshiftDataApiError,
 )
 from app.schemas.account_360 import (
@@ -28,20 +28,80 @@ from app.schemas.account_360 import (
 
 CUSTOMER_TABLE = "customer.customer"
 CUSTOMER_ID_COLUMN = "customer_id"
+CUSTOMER_PROFILE_SQL = f"""
+SELECT
+    customer_id,
+    email,
+    country,
+    id_number,
+    id_type,
+    last_name,
+    name,
+    calling_code,
+    phone_number,
+    username,
+    is_company,
+    kyc_stage_1,
+    kyc_stage_2,
+    kyc_stage_3,
+    compliance_status,
+    nationality
+FROM {CUSTOMER_TABLE}
+WHERE {CUSTOMER_ID_COLUMN} = :account_id
+LIMIT 1
+""".strip()
 
-# Candidate names must be confirmed against customer.customer before production use.
-CUSTOMER_COLUMN_MAP = {
-    "full_name": ("full_name", "name", "customer_name"),
-    "email": ("email", "email_address"),
-    "phone": ("phone", "phone_number"),
-    "country": ("country", "country_code"),
-    "customer_type": ("customer_type", "person_type"),
-    "plan": ("plan", "plan_name"),
-    "status": ("status", "customer_status"),
-    "kyc_status": ("kyc_status", "verification_status"),
-    "created_at": ("created_at", "creation_date"),
-    "last_activity_at": ("last_activity_at", "last_transaction_at"),
-}
+ACTIVE_PLAN_SQL = """
+SELECT
+    pl.name
+FROM subscription.subscription s
+JOIN subscription.plan_country pc
+    ON s.plan_country_id = pc.id
+JOIN subscription.plan_locale pl
+    ON pc.plan_id = pl.plan_id
+WHERE s.customer_id = :account_id
+    AND s.status = 'ACTIVE'
+LIMIT 1
+""".strip()
+
+CUSTOMER_SEGMENTATION_SQL = """
+SELECT segmentation
+FROM customer.segmentation
+WHERE customer_id = :account_id
+LIMIT 1
+""".strip()
+
+RECENT_TRANSACTIONS_SQL = """
+SELECT
+    transaction_id,
+    origin_amount,
+    origin_currency,
+    tx_status,
+    start_date,
+    successfully_completed_date
+FROM transaction.transaction
+WHERE customer_id = :account_id
+ORDER BY start_date DESC
+LIMIT 5
+""".strip()
+
+TRANSACTION_COUNT_SQL = """
+SELECT COUNT(transaction_id) AS transaction_count
+FROM transaction.transaction
+WHERE customer_id = :account_id
+""".strip()
+
+DEVICE_INFO_SQL = """
+SELECT
+    app_version,
+    date_version,
+    device,
+    device_os
+FROM customer.device_info
+WHERE customer_id = :account_id
+ORDER BY date_version DESC
+LIMIT 1
+""".strip()
 
 SUPPORTED_PRODUCT_CODES = {
     "remittance",
@@ -51,6 +111,8 @@ SUPPORTED_PRODUCT_CODES = {
     "payments",
     "card_purchases",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class Account360RepositoryError(RuntimeError):
@@ -81,6 +143,20 @@ class MockAccount360Repository:
         return _build_mock_product_detail(account_id, product_code)
 
 
+class UnavailableAccount360Repository:
+    """Prevents mock fallback when real mode is explicitly enabled."""
+
+    def get_account_360(self, account_id: str) -> Optional[Account360Response]:
+        raise Account360RepositoryError("Account data source is not configured")
+
+    def get_product_detail(
+        self,
+        account_id: str,
+        product_code: str,
+    ) -> Optional[AccountProductDetailResponse]:
+        raise Account360RepositoryError("Account data source is not configured")
+
+
 class RedshiftAccount360Repository:
     """Reads the base profile from Redshift and keeps unconnected modules mocked."""
 
@@ -93,23 +169,17 @@ class RedshiftAccount360Repository:
         self._mock_repository = mock_repository or MockAccount360Repository()
 
     def get_account_360(self, account_id: str) -> Optional[Account360Response]:
-        sql = (
-            f"SELECT * FROM {CUSTOMER_TABLE} "
-            f"WHERE {CUSTOMER_ID_COLUMN} = :account_id LIMIT 1"
-        )
-
         try:
             rows = self._client.execute(
-                sql,
+                CUSTOMER_PROFILE_SQL,
                 parameters=[{"name": "account_id", "value": account_id}],
             )
-        except RedshiftDataApiCredentialsError:
-            return self._mock_repository.get_account_360(account_id)
         except RedshiftDataApiError:
             raise Account360RepositoryError(
                 "Account data source is unavailable"
             ) from None
 
+        logger.info("Account 360 Redshift rows returned: %d", len(rows))
         if not rows:
             return None
 
@@ -120,30 +190,129 @@ class RedshiftAccount360Repository:
                 rows[0],
                 response.profile,
             )
+            response.account_id = response.profile.account_id
+            self._enrich_optional_sections(response, account_id)
             response.badges = _profile_badges(response.profile)
             response.data_source = "redshift_partial"
             return response
         except (TypeError, ValueError, ValidationError):
             raise Account360RepositoryError("Customer mapping failed") from None
 
+    def _enrich_optional_sections(
+        self,
+        response: Account360Response,
+        account_id: str,
+    ) -> None:
+        # In real mode these fields must not retain demo values if their source is
+        # unavailable. Other, not-yet-connected Account 360 modules remain mock.
+        response.profile.plan = "—"
+        response.profile.segment = "—"
+        response.activity = []
+        response.metrics.transactions_count = None
+        response.device = AccountDeviceSummary(security_status="—")
+
+        response.profile.segment = self.get_customer_segmentation(account_id) or "—"
+
+        plan_rows = self._execute_optional(ACTIVE_PLAN_SQL, account_id, "active plan")
+        if plan_rows:
+            response.profile.plan = _string_value(plan_rows[0].get("name")) or "—"
+
+        transaction_rows = self._execute_optional(
+            RECENT_TRANSACTIONS_SQL,
+            account_id,
+            "recent transactions",
+        )
+        if transaction_rows is not None:
+            response.activity = _map_transactions(transaction_rows)
+
+        count_rows = self._execute_optional(
+            TRANSACTION_COUNT_SQL,
+            account_id,
+            "transaction count",
+        )
+        if count_rows:
+            response.metrics.transactions_count = _integer_value(
+                count_rows[0].get("transaction_count")
+            )
+
+        device_rows = self._execute_optional(
+            DEVICE_INFO_SQL,
+            account_id,
+            "device info",
+        )
+        if device_rows:
+            try:
+                response.device = _map_device(device_rows[0])
+            except (TypeError, ValueError, ValidationError):
+                logger.warning("Account 360 skipped invalid device info")
+
+    def get_customer_segmentation(self, account_id: str) -> Optional[str]:
+        rows = self._execute_optional(
+            CUSTOMER_SEGMENTATION_SQL,
+            account_id,
+            "customer segmentation",
+        )
+        if not rows:
+            return None
+        return _string_value(rows[0].get("segmentation"))
+
+    def _execute_optional(
+        self,
+        sql: str,
+        account_id: str,
+        query_name: str,
+    ) -> Optional[list[Dict[str, Any]]]:
+        try:
+            rows = self._client.execute(
+                sql,
+                parameters=[{"name": "account_id", "value": account_id}],
+            )
+            logger.info("Account 360 %s rows returned: %d", query_name, len(rows))
+            return rows
+        except RedshiftDataApiError:
+            logger.warning("Account 360 optional query failed: %s", query_name)
+            return None
+
     def get_product_detail(
         self,
         account_id: str,
         product_code: str,
     ) -> Optional[AccountProductDetailResponse]:
-        return self._mock_repository.get_product_detail(account_id, product_code)
+        detail = self._mock_repository.get_product_detail(account_id, product_code)
+        if detail is None:
+            return None
+
+        detail.account_id = account_id
+        detail.data_source = "redshift_partial"
+        if product_code != "remittance":
+            return detail
+
+        transaction_rows = self._execute_optional(
+            RECENT_TRANSACTIONS_SQL,
+            account_id,
+            "remittance transactions",
+        )
+        detail.recent_activity = (
+            _map_transactions(transaction_rows)
+            if transaction_rows is not None
+            else []
+        )
+        return detail
 
 
 def create_account_360_repository(
     settings: Optional[Settings] = None,
 ) -> Account360Repository:
     resolved_settings = settings or get_settings()
-    if (
-        resolved_settings.account_360_use_mock_data
-        or not resolved_settings.has_redshift_data_api_config
-    ):
+    if resolved_settings.account_360_use_mock_data:
+        logger.info("Account 360 repository mode: mock")
         return MockAccount360Repository()
 
+    if not resolved_settings.has_redshift_data_api_config:
+        logger.error("Account 360 repository mode: redshift (configuration incomplete)")
+        return UnavailableAccount360Repository()
+
+    logger.info("Account 360 repository mode: redshift")
     secret = resolved_settings.redshift_secret_arn
     return RedshiftAccount360Repository(
         RedshiftDataApiClient(
@@ -164,45 +333,136 @@ def _map_customer_profile(
     row: Dict[str, Any],
     fallback: AccountProfile,
 ) -> AccountProfile:
+    customer_id = _string_value(row.get("customer_id")) or account_id
+    first_name = _string_value(row.get("name"))
+    last_name = _string_value(row.get("last_name"))
+    full_name = " ".join(
+        value for value in (first_name, last_name) if value
+    ) or f"Cuenta {customer_id}"
+    id_type = _string_value(row.get("id_type"))
+    id_number = _string_value(row.get("id_number"))
+    document = " ".join(value for value in (id_type, id_number) if value) or None
+    calling_code = _string_value(row.get("calling_code"))
+    phone_number = _string_value(row.get("phone_number"))
+    if calling_code and not calling_code.startswith("+"):
+        calling_code = f"+{calling_code}"
+    phone = " ".join(value for value in (calling_code, phone_number) if value) or None
+
     profile = fallback.model_dump()
     profile.update(
         {
-            "account_id": account_id,
-            "full_name": f"Cuenta {account_id}",
-            "email": None,
-            "phone": None,
-            "country": None,
-            "customer_type": "UNKNOWN",
-            "plan": "UNKNOWN",
+            "account_id": customer_id,
+            "internal_id": customer_id,
+            "full_name": full_name,
+            "email": _string_value(row.get("email")),
+            "phone": phone,
+            "country": _string_value(row.get("country")),
+            "document": document,
+            "document_type": id_type,
+            "document_number": id_number,
+            "username": _string_value(row.get("username")),
+            "segment": "—",
+            "nationality": _string_value(row.get("nationality")),
+            "kyc_stage_1": _string_value(row.get("kyc_stage_1")),
+            "kyc_stage_2": _string_value(row.get("kyc_stage_2")),
+            "kyc_stage_3": _string_value(row.get("kyc_stage_3")),
+            "compliance_status": _string_value(row.get("compliance_status")),
+            "account_type": _account_type(row.get("is_company")),
+            "customer_type": _customer_type(row.get("is_company")),
+            "plan": "—",
             "status": "UNKNOWN",
-            "kyc_status": "UNKNOWN",
+            "kyc_status": _string_value(row.get("kyc_stage_1")) or "—",
             "created_at": None,
             "last_activity_at": None,
             "days_without_activity": None,
         }
     )
-
-    for target, candidates in CUSTOMER_COLUMN_MAP.items():
-        value = _first_present(row, candidates)
-        if value is not None:
-            profile[target] = value
-
-    if not _first_present(row, CUSTOMER_COLUMN_MAP["full_name"]):
-        first_name = _first_present(row, ("first_name", "given_name"))
-        last_name = _first_present(row, ("last_name", "family_name"))
-        combined_name = " ".join(
-            str(value).strip() for value in (first_name, last_name) if value
-        )
-        if combined_name:
-            profile["full_name"] = combined_name
-
     return AccountProfile.model_validate(profile)
 
 
-def _first_present(row: Dict[str, Any], candidates: Sequence[str]) -> Any:
-    return next(
-        (row[name] for name in candidates if name in row and row[name] is not None),
-        None,
+def _string_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _is_company(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n"}:
+        return False
+    return None
+
+
+def _account_type(value: Any) -> str:
+    company = _is_company(value)
+    if company is None:
+        return "—"
+    return "Company Account" if company else "Person Account"
+
+
+def _customer_type(value: Any) -> str:
+    company = _is_company(value)
+    if company is None:
+        return "—"
+    return "Empresa" if company else "Persona"
+
+
+def _integer_value(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_transactions(rows: list[Dict[str, Any]]) -> list[AccountActivityItem]:
+    activities: list[AccountActivityItem] = []
+    for row in rows:
+        transaction_id = _string_value(row.get("transaction_id"))
+        occurred_at = row.get("successfully_completed_date") or row.get("start_date")
+        if not transaction_id or not occurred_at:
+            continue
+        try:
+            activities.append(
+                AccountActivityItem(
+                    activity_id=transaction_id,
+                    activity_type="transaction",
+                    title="Transacción",
+                    occurred_at=occurred_at,
+                    status=_string_value(row.get("tx_status")),
+                    amount=_float_value(row.get("origin_amount")),
+                    currency=_string_value(row.get("origin_currency")),
+                )
+            )
+        except (TypeError, ValueError, ValidationError):
+            logger.warning("Account 360 skipped an invalid transaction row")
+    return activities
+
+
+def _map_device(row: Dict[str, Any]) -> AccountDeviceSummary:
+    return AccountDeviceSummary(
+        platform=_string_value(row.get("device_os")),
+        app_version=_string_value(row.get("app_version")),
+        device_model=_string_value(row.get("device")),
+        last_login_at=row.get("date_version"),
+        security_status="—",
     )
 
 
@@ -212,7 +472,7 @@ def _profile_badges(profile: AccountProfile) -> list[AccountBadge]:
         AccountBadge(
             code="compliance",
             label="Compliance",
-            value="Aprobado",
+            value=profile.compliance_status or "—",
             tone="success",
         ),
         AccountBadge(code="plan", label="Plan", value=profile.plan, tone="info"),

@@ -7,8 +7,15 @@ export type AccountProfile = {
   customer_type: string;
   account_type?: string | null;
   segment?: string | null;
+  username?: string | null;
+  document?: string | null;
+  document_type?: string | null;
   document_number?: string | null;
   nationality?: string | null;
+  kyc_stage_1?: string | null;
+  kyc_stage_2?: string | null;
+  kyc_stage_3?: string | null;
+  compliance_status?: string | null;
   account_manager?: string | null;
   plan: string;
   status: string;
@@ -30,6 +37,7 @@ export type AccountSummaryMetricsData = {
   historical_volume_usd: number;
   interactions_count: number;
   attachments_count: number;
+  transactions_count?: number | null;
 };
 
 export type AccountWallet = {

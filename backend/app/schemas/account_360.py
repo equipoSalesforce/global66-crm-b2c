@@ -6,10 +6,22 @@ from pydantic import BaseModel, Field
 
 class AccountProfile(BaseModel):
     account_id: str
+    internal_id: Optional[str] = None
     full_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
     country: Optional[str] = None
+    document: Optional[str] = None
+    document_type: Optional[str] = None
+    document_number: Optional[str] = None
+    username: Optional[str] = None
+    segment: Optional[str] = None
+    account_type: Optional[str] = None
+    nationality: Optional[str] = None
+    kyc_stage_1: Optional[str] = None
+    kyc_stage_2: Optional[str] = None
+    kyc_stage_3: Optional[str] = None
+    compliance_status: Optional[str] = None
     customer_type: str
     plan: str
     status: str
@@ -31,6 +43,7 @@ class AccountSummaryMetrics(BaseModel):
     historical_volume_usd: float
     interactions_count: int
     attachments_count: int
+    transactions_count: Optional[int] = None
 
 
 class AccountWallet(BaseModel):

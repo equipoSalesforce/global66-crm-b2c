@@ -49,6 +49,8 @@ class Settings(BaseSettings):
             and self.aws_region
             and self.redshift_cluster_identifier
             and self.redshift_database
+            and self.redshift_secret_arn
+            and self.redshift_secret_arn.get_secret_value()
         )
 
 
