@@ -100,18 +100,20 @@ iniciar la aplicación.
 La consulta principal usa `customer.customer` y filtra `customer_id` mediante el
 parámetro `:account_id` de Redshift Data API. Lee `customer_id`, `email`, `country`,
 `id_number`, `id_type`, `last_name`, `name`, `calling_code`, `phone_number`,
-`username`, `segmentation`, `is_company`, `kyc_stage_1`, `kyc_stage_2`,
+`username`, `is_company`, `kyc_stage_1`, `kyc_stage_2`,
 `kyc_stage_3`, `compliance_status` y `nationality`. Estas columnas reemplazan el
 perfil base. Si el cliente no existe en modo real, el endpoint responde `404`; no
 se inventa una identidad mock.
 
 Después de encontrar el perfil, Account 360 intenta enriquecerlo con consultas
-independientes: el plan activo desde `subscription.subscription`,
+independientes: la segmentación desde `customer.segmentation`; el plan activo desde `subscription.subscription`,
 `subscription.plan_country` y `subscription.plan_locale`; los últimos cinco
 movimientos y el conteo histórico desde `transaction.transaction`; y la versión de
 app/dispositivo desde `customer.device_info`. Todas usan `:account_id` como
 parámetro. Una falla secundaria se registra sin datos sensibles y deja solamente
-esa sección vacía o con `—`; no invalida el perfil existente.
+esa sección vacía o con `—`; no invalida el perfil existente. Las transacciones
+recientes alimentan tanto la actividad unificada como el detalle desplegable de
+Remesa. El conteo histórico queda disponible en `metrics.transactions_count`.
 
 Billeteras, productos, historial KYC, beneficios, términos y los demás módulos aún
 sin fuente confirmada siguen siendo complemento mock. La respuesta se identifica

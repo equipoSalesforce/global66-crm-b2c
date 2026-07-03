@@ -40,7 +40,6 @@ SELECT
     calling_code,
     phone_number,
     username,
-    segmentation,
     is_company,
     kyc_stage_1,
     kyc_stage_2,
@@ -62,6 +61,13 @@ JOIN subscription.plan_locale pl
     ON pc.plan_id = pl.plan_id
 WHERE s.customer_id = :account_id
     AND s.status = 'ACTIVE'
+LIMIT 1
+""".strip()
+
+CUSTOMER_SEGMENTATION_SQL = """
+SELECT segmentation
+FROM customer.segmentation
+WHERE customer_id = :account_id
 LIMIT 1
 """.strip()
 
@@ -200,9 +206,12 @@ class RedshiftAccount360Repository:
         # In real mode these fields must not retain demo values if their source is
         # unavailable. Other, not-yet-connected Account 360 modules remain mock.
         response.profile.plan = "—"
+        response.profile.segment = "—"
         response.activity = []
         response.metrics.transactions_count = None
         response.device = AccountDeviceSummary(security_status="—")
+
+        response.profile.segment = self.get_customer_segmentation(account_id) or "—"
 
         plan_rows = self._execute_optional(ACTIVE_PLAN_SQL, account_id, "active plan")
         if plan_rows:
@@ -237,6 +246,16 @@ class RedshiftAccount360Repository:
             except (TypeError, ValueError, ValidationError):
                 logger.warning("Account 360 skipped invalid device info")
 
+    def get_customer_segmentation(self, account_id: str) -> Optional[str]:
+        rows = self._execute_optional(
+            CUSTOMER_SEGMENTATION_SQL,
+            account_id,
+            "customer segmentation",
+        )
+        if not rows:
+            return None
+        return _string_value(rows[0].get("segmentation"))
+
     def _execute_optional(
         self,
         sql: str,
@@ -259,7 +278,26 @@ class RedshiftAccount360Repository:
         account_id: str,
         product_code: str,
     ) -> Optional[AccountProductDetailResponse]:
-        return self._mock_repository.get_product_detail(account_id, product_code)
+        detail = self._mock_repository.get_product_detail(account_id, product_code)
+        if detail is None:
+            return None
+
+        detail.account_id = account_id
+        detail.data_source = "redshift_partial"
+        if product_code != "remittance":
+            return detail
+
+        transaction_rows = self._execute_optional(
+            RECENT_TRANSACTIONS_SQL,
+            account_id,
+            "remittance transactions",
+        )
+        detail.recent_activity = (
+            _map_transactions(transaction_rows)
+            if transaction_rows is not None
+            else []
+        )
+        return detail
 
 
 def create_account_360_repository(
@@ -323,7 +361,7 @@ def _map_customer_profile(
             "document_type": id_type,
             "document_number": id_number,
             "username": _string_value(row.get("username")),
-            "segment": _string_value(row.get("segmentation")),
+            "segment": "—",
             "nationality": _string_value(row.get("nationality")),
             "kyc_stage_1": _string_value(row.get("kyc_stage_1")),
             "kyc_stage_2": _string_value(row.get("kyc_stage_2")),

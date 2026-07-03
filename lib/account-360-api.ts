@@ -8,6 +8,8 @@ export type AccountProfile = {
   account_type?: string | null;
   segment?: string | null;
   username?: string | null;
+  document?: string | null;
+  document_type?: string | null;
   document_number?: string | null;
   nationality?: string | null;
   kyc_stage_1?: string | null;

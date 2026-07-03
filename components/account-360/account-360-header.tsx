@@ -1,5 +1,18 @@
 import type { Account360, AccountBadge } from "@/lib/account-360-api";
-import { BadgeCheck, Clock3, MessageCircle, Plus, ShieldCheck } from "lucide-react";
+import {
+  BadgeCheck,
+  Clock3,
+  Hash,
+  IdCard,
+  Mail,
+  MessageCircle,
+  PackageCheck,
+  Phone,
+  Plus,
+  ShieldCheck,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { displayValue, initials } from "./account-360-format";
 
@@ -21,6 +34,21 @@ function Badge({ badge }: { badge: AccountBadge }) {
   );
 }
 
+function ProfileDatum({
+  icon: Icon,
+  children,
+}: {
+  icon: LucideIcon;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={1.8} />
+      <span className="truncate">{children}</span>
+    </span>
+  );
+}
+
 export function Account360Header({ account }: { account: Account360 }) {
   const { profile } = account;
   const latestProduct = [...account.products]
@@ -33,6 +61,9 @@ export function Account360Header({ account }: { account: Account360 }) {
   const badges = account.badges.filter((badge) => badge.code !== "inactivity");
   const inactivity = account.badges.find((badge) => badge.code === "inactivity");
   const whatsappPhone = profile.phone?.replace(/\D/g, "");
+  const documentLabel = profile.document_number
+    ? `${profile.document_type || "Documento"} ${profile.document_number}`
+    : `${profile.document_type || "Documento"} —`;
   const accountManager =
     typeof account.account_manager === "string"
       ? account.account_manager
@@ -57,11 +88,13 @@ export function Account360Header({ account }: { account: Account360 }) {
                 {displayValue(profile.account_type || profile.customer_type)}
               </span>
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-medium text-[var(--g66-text-secondary)]">
-              <span>{displayValue(profile.email, "Email no disponible")}</span>
-              <span>{displayValue(profile.country, "País no disponible")}</span>
-              <span>Documento {displayValue(profile.document_number)}</span>
-              <span>{displayValue(profile.phone, "Teléfono no disponible")}</span>
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5 text-[11px] font-medium text-[var(--g66-text-secondary)]">
+              <ProfileDatum icon={PackageCheck}>{displayValue(profile.plan, "Plan no disponible")}</ProfileDatum>
+              <ProfileDatum icon={Mail}>{displayValue(profile.email, "Email no disponible")}</ProfileDatum>
+              <ProfileDatum icon={Hash}>{displayValue(profile.account_id, "ID no disponible")}</ProfileDatum>
+              <ProfileDatum icon={IdCard}>{profile.country ? `${profile.country} · ${documentLabel}` : documentLabel}</ProfileDatum>
+              <ProfileDatum icon={Phone}>{displayValue(profile.phone, "Teléfono no disponible")}</ProfileDatum>
+              {profile.username ? <ProfileDatum icon={UserRound}>{profile.username}</ProfileDatum> : null}
             </div>
           </div>
         </div>
