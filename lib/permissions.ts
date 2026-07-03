@@ -248,8 +248,8 @@ export const navigationItems: NavigationItem[] = [
     roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
   },
   {
-    label: "Clientes",
-    href: "/clientes",
+    label: "Cuentas",
+    href: "/cuentas",
     icon: "CL",
     permission: "view_customers",
     roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
@@ -479,7 +479,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   AGENT: [
     "/dashboard",
     "/casos",
-    "/clientes",
+    "/cuentas",
     "/agentes",
     "/conversaciones",
     "/casos?channel=GMAIL",
@@ -487,7 +487,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   SUPERVISOR: [
     "/dashboard",
     "/casos",
-    "/clientes",
+    "/cuentas",
     "/agentes",
     "/conversaciones",
     "/casos?channel=GMAIL",
@@ -497,7 +497,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   COMPLIANCE: [
     "/dashboard",
     "/casos",
-    "/clientes",
+    "/cuentas",
     "/conversaciones",
     "/casos?channel=GMAIL",
     "/logs-ia",
@@ -507,7 +507,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ADMIN: [
     "/dashboard",
     "/casos",
-    "/clientes",
+    "/cuentas",
     "/agentes",
     "/conversaciones",
     "/casos?channel=GMAIL",
@@ -519,7 +519,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   AUDITOR: [
     "/dashboard",
     "/casos",
-    "/clientes",
+    "/cuentas",
     "/conversaciones",
     "/casos?channel=GMAIL",
     "/logs-ia",

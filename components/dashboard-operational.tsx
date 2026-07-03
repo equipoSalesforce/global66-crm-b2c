@@ -620,9 +620,9 @@ export function DashboardOperational({
       permission: "editCaseFields" as Permission,
     },
     {
-      label: "Buscar cliente",
-      detail: "Consultar información de clientes",
-      href: "/clientes",
+      label: "Ver cuenta 360",
+      detail: "Consultar la cuenta integral del cliente",
+      href: "/cuentas",
       icon: UserRound,
       permission: "viewCustomers" as Permission,
     },

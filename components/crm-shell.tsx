@@ -28,6 +28,7 @@ const navigationIconByHref: Record<string, LucideIcon> = {
   "/dashboard": Home,
   "/casos": BriefcaseBusiness,
   "/clientes": UsersRound,
+  "/cuentas": UsersRound,
   "/agentes": UserRoundCheck,
   "/conversaciones": MessageCircle,
   "/casos?channel=GMAIL": Mail,
@@ -55,6 +56,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const hasGlobalSidebar = true;
   const isDashboard = pathname === "/dashboard";
   const isCasesConsole = pathname === "/casos" || isCaseExpediente;
+  const isAccount360 = pathname.startsWith("/cuentas/");
+  const isSidebarCompact = sidebarCollapsed || isAccount360;
   const visibleNavigationItems = getNavigationItems(agentRole, rolePermissions);
   const activeItem =
     [...visibleNavigationItems]
@@ -172,18 +175,18 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         {hasGlobalSidebar ? (
           <aside
             className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-[var(--g66-border)] bg-[var(--g66-sidebar-bg)] py-5 shadow-[var(--g66-shadow-card)] transition-all ${
-              sidebarCollapsed ? "w-16 px-2" : "w-60 px-4"
+              isSidebarCompact ? "w-16 px-2" : "w-60 px-4"
             }`}
           >
             <Link
               href="/dashboard"
               className={`flex items-center ${
-                sidebarCollapsed ? "justify-center" : "gap-3"
+                isSidebarCompact ? "justify-center" : "gap-3"
               }`}
               title="Global66 CRM"
             >
               <Global66Mark className="h-9 w-9" />
-              <div className={sidebarCollapsed ? "hidden" : ""}>
+              <div className={isSidebarCompact ? "hidden" : ""}>
                 <p className="text-lg font-black leading-5 text-[var(--g66-brand-blue)]">
                   Global66 CRM
                 </p>
@@ -208,7 +211,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                       isActive
                         ? "bg-[var(--g66-brand-blue)] text-white shadow-[0_10px_22px_rgb(32_94_241/0.18)]"
                         : "text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
-                    } ${sidebarCollapsed ? "justify-center px-0" : ""}`}
+                    } ${isSidebarCompact ? "justify-center px-0" : ""}`}
                     title={item.label}
                   >
                     <span
@@ -218,7 +221,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                     >
                       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
                     </span>
-                    <span className={sidebarCollapsed ? "hidden" : "truncate"}>
+                    <span className={isSidebarCompact ? "hidden" : "truncate"}>
                       {item.label}
                     </span>
                   </Link>
@@ -228,18 +231,18 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
 
             <div
               className={`mt-auto rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] ${
-                sidebarCollapsed ? "p-2" : "p-3"
+                isSidebarCompact ? "p-2" : "p-3"
               }`}
             >
               <div
                 className={`flex items-center ${
-                  sidebarCollapsed ? "justify-center" : "gap-2"
+                  isSidebarCompact ? "justify-center" : "gap-2"
                 }`}
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--g66-brand-blue)] text-xs font-black text-white">
                   {agentName.slice(0, 2).toUpperCase()}
                 </span>
-                <div className={sidebarCollapsed ? "hidden" : "min-w-0"}>
+                <div className={isSidebarCompact ? "hidden" : "min-w-0"}>
                   <p className="text-xs font-black text-[var(--g66-text-primary)]">
                     Sesión demo
                   </p>
@@ -248,23 +251,23 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                   </p>
                 </div>
               </div>
-              <button
+              {!isAccount360 ? <button
                 type="button"
                 onClick={toggleSidebarCollapsed}
                 className={`mt-3 flex h-8 w-full items-center justify-center rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white text-xs font-black text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] ${
-                  sidebarCollapsed ? "px-0" : "px-3"
+                  isSidebarCompact ? "px-0" : "px-3"
                 }`}
                 title={sidebarCollapsed ? "Expandir sidebar" : "Colapsar sidebar"}
               >
-                {sidebarCollapsed ? ">" : "< Colapsar"}
-              </button>
+                {isSidebarCompact ? ">" : "< Colapsar"}
+              </button> : null}
             </div>
           </aside>
         ) : null}
 
         <header
           className={`fixed right-0 top-0 z-40 grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--g66-border)] bg-[var(--g66-surface)] px-2 shadow-[var(--g66-shadow-card)] ${
-            hasGlobalSidebar ? (sidebarCollapsed ? "left-16" : "left-60") : "left-0"
+            hasGlobalSidebar ? (isSidebarCompact ? "left-16" : "left-60") : "left-0"
           }`}
         >
           <div ref={launcherRef} className="relative">
@@ -331,12 +334,12 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
             ) : null}
           </div>
           {hasGlobalSidebar ? (
-            <div className="flex justify-center">
+            <div className="flex justify-center px-4">
               <input
                 value={casesGlobalSearch}
                 onChange={(event) => updateCasesGlobalSearch(event.target.value)}
                 placeholder="Buscar clientes, casos, conversaciones..."
-                className="h-7 w-full max-w-2xl rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] px-3 text-sm text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)] focus:border-[var(--g66-brand-blue)] focus:bg-white focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
+                className={`h-7 w-full rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] px-3 text-sm text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)] focus:border-[var(--g66-brand-blue)] focus:bg-white focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)] ${isAccount360 ? "max-w-lg" : "max-w-2xl"}`}
               />
             </div>
           ) : (
@@ -373,7 +376,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         <main
           className={
             hasGlobalSidebar
-              ? sidebarCollapsed
+              ? isSidebarCompact
                 ? `pl-16 pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
                 : `pl-60 pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
               : `pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
@@ -385,6 +388,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                 ? "h-[calc(100vh-40px)] min-h-0 w-full overflow-hidden bg-white"
                 : isDashboard
                   ? "min-h-[calc(100vh-40px)] w-full overflow-hidden bg-[var(--g66-background)]"
+                : isAccount360
+                  ? "flex min-h-[calc(100vh-40px)] w-full flex-col gap-3 bg-[#f5f7fb] px-3 py-3 xl:px-4"
                 : "mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-5 lg:px-6 lg:py-6"
             }
           >
