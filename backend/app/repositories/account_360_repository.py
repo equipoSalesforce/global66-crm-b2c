@@ -38,9 +38,62 @@ SELECT
     last_name,
     name,
     calling_code,
-    phone_number
+    phone_number,
+    username,
+    segmentation,
+    is_company,
+    kyc_stage_1,
+    kyc_stage_2,
+    kyc_stage_3,
+    compliance_status,
+    nationality
 FROM {CUSTOMER_TABLE}
 WHERE {CUSTOMER_ID_COLUMN} = :account_id
+LIMIT 1
+""".strip()
+
+ACTIVE_PLAN_SQL = """
+SELECT
+    pl.name
+FROM subscription.subscription s
+JOIN subscription.plan_country pc
+    ON s.plan_country_id = pc.id
+JOIN subscription.plan_locale pl
+    ON pc.plan_id = pl.plan_id
+WHERE s.customer_id = :account_id
+    AND s.status = 'ACTIVE'
+LIMIT 1
+""".strip()
+
+RECENT_TRANSACTIONS_SQL = """
+SELECT
+    transaction_id,
+    origin_amount,
+    origin_currency,
+    tx_status,
+    start_date,
+    successfully_completed_date
+FROM transaction.transaction
+WHERE customer_id = :account_id
+ORDER BY start_date DESC
+LIMIT 5
+""".strip()
+
+TRANSACTION_COUNT_SQL = """
+SELECT COUNT(transaction_id) AS transaction_count
+FROM transaction.transaction
+WHERE customer_id = :account_id
+""".strip()
+
+DEVICE_INFO_SQL = """
+SELECT
+    app_version,
+    date_version,
+    device,
+    device_os
+FROM customer.device_info
+WHERE customer_id = :account_id
+ORDER BY date_version DESC
 LIMIT 1
 """.strip()
 
@@ -131,11 +184,75 @@ class RedshiftAccount360Repository:
                 rows[0],
                 response.profile,
             )
+            response.account_id = response.profile.account_id
+            self._enrich_optional_sections(response, account_id)
             response.badges = _profile_badges(response.profile)
             response.data_source = "redshift_partial"
             return response
         except (TypeError, ValueError, ValidationError):
             raise Account360RepositoryError("Customer mapping failed") from None
+
+    def _enrich_optional_sections(
+        self,
+        response: Account360Response,
+        account_id: str,
+    ) -> None:
+        # In real mode these fields must not retain demo values if their source is
+        # unavailable. Other, not-yet-connected Account 360 modules remain mock.
+        response.profile.plan = "—"
+        response.activity = []
+        response.metrics.transactions_count = None
+        response.device = AccountDeviceSummary(security_status="—")
+
+        plan_rows = self._execute_optional(ACTIVE_PLAN_SQL, account_id, "active plan")
+        if plan_rows:
+            response.profile.plan = _string_value(plan_rows[0].get("name")) or "—"
+
+        transaction_rows = self._execute_optional(
+            RECENT_TRANSACTIONS_SQL,
+            account_id,
+            "recent transactions",
+        )
+        if transaction_rows is not None:
+            response.activity = _map_transactions(transaction_rows)
+
+        count_rows = self._execute_optional(
+            TRANSACTION_COUNT_SQL,
+            account_id,
+            "transaction count",
+        )
+        if count_rows:
+            response.metrics.transactions_count = _integer_value(
+                count_rows[0].get("transaction_count")
+            )
+
+        device_rows = self._execute_optional(
+            DEVICE_INFO_SQL,
+            account_id,
+            "device info",
+        )
+        if device_rows:
+            try:
+                response.device = _map_device(device_rows[0])
+            except (TypeError, ValueError, ValidationError):
+                logger.warning("Account 360 skipped invalid device info")
+
+    def _execute_optional(
+        self,
+        sql: str,
+        account_id: str,
+        query_name: str,
+    ) -> Optional[list[Dict[str, Any]]]:
+        try:
+            rows = self._client.execute(
+                sql,
+                parameters=[{"name": "account_id", "value": account_id}],
+            )
+            logger.info("Account 360 %s rows returned: %d", query_name, len(rows))
+            return rows
+        except RedshiftDataApiError:
+            logger.warning("Account 360 optional query failed: %s", query_name)
+            return None
 
     def get_product_detail(
         self,
@@ -205,10 +322,18 @@ def _map_customer_profile(
             "document": document,
             "document_type": id_type,
             "document_number": id_number,
-            "customer_type": "UNKNOWN",
-            "plan": "UNKNOWN",
+            "username": _string_value(row.get("username")),
+            "segment": _string_value(row.get("segmentation")),
+            "nationality": _string_value(row.get("nationality")),
+            "kyc_stage_1": _string_value(row.get("kyc_stage_1")),
+            "kyc_stage_2": _string_value(row.get("kyc_stage_2")),
+            "kyc_stage_3": _string_value(row.get("kyc_stage_3")),
+            "compliance_status": _string_value(row.get("compliance_status")),
+            "account_type": _account_type(row.get("is_company")),
+            "customer_type": _customer_type(row.get("is_company")),
+            "plan": "—",
             "status": "UNKNOWN",
-            "kyc_status": "UNKNOWN",
+            "kyc_status": _string_value(row.get("kyc_stage_1")) or "—",
             "created_at": None,
             "last_activity_at": None,
             "days_without_activity": None,
@@ -224,13 +349,92 @@ def _string_value(value: Any) -> Optional[str]:
     return normalized or None
 
 
+def _is_company(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n"}:
+        return False
+    return None
+
+
+def _account_type(value: Any) -> str:
+    company = _is_company(value)
+    if company is None:
+        return "—"
+    return "Company Account" if company else "Person Account"
+
+
+def _customer_type(value: Any) -> str:
+    company = _is_company(value)
+    if company is None:
+        return "—"
+    return "Empresa" if company else "Persona"
+
+
+def _integer_value(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_transactions(rows: list[Dict[str, Any]]) -> list[AccountActivityItem]:
+    activities: list[AccountActivityItem] = []
+    for row in rows:
+        transaction_id = _string_value(row.get("transaction_id"))
+        occurred_at = row.get("successfully_completed_date") or row.get("start_date")
+        if not transaction_id or not occurred_at:
+            continue
+        try:
+            activities.append(
+                AccountActivityItem(
+                    activity_id=transaction_id,
+                    activity_type="transaction",
+                    title="Transacción",
+                    occurred_at=occurred_at,
+                    status=_string_value(row.get("tx_status")),
+                    amount=_float_value(row.get("origin_amount")),
+                    currency=_string_value(row.get("origin_currency")),
+                )
+            )
+        except (TypeError, ValueError, ValidationError):
+            logger.warning("Account 360 skipped an invalid transaction row")
+    return activities
+
+
+def _map_device(row: Dict[str, Any]) -> AccountDeviceSummary:
+    return AccountDeviceSummary(
+        platform=_string_value(row.get("device_os")),
+        app_version=_string_value(row.get("app_version")),
+        device_model=_string_value(row.get("device")),
+        last_login_at=row.get("date_version"),
+        security_status="—",
+    )
+
+
 def _profile_badges(profile: AccountProfile) -> list[AccountBadge]:
     return [
         AccountBadge(code="kyc", label="KYC", value=profile.kyc_status, tone="success"),
         AccountBadge(
             code="compliance",
             label="Compliance",
-            value="Aprobado",
+            value=profile.compliance_status or "—",
             tone="success",
         ),
         AccountBadge(code="plan", label="Plan", value=profile.plan, tone="info"),

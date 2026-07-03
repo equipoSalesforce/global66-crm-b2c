@@ -94,12 +94,12 @@ export function AccountSidePanel({ account }: { account: Account360 }) {
         <button type="button" className="mt-2 text-[9px] font-bold text-[var(--g66-brand-blue)] hover:underline">Ver todos los campos</button>
       </Panel>
 
-      <Panel icon={ShieldCheck} title="KYC & Compliance" badge={compliance.review_status ? "Aprobado" : undefined}>
+      <Panel icon={ShieldCheck} title="KYC & Compliance" badge={profile.compliance_status ? approvedLabel(profile.compliance_status) : undefined}>
         <div className="space-y-0.5">
-          <KycRow label="KYC Fase I" value={approvedLabel(profile.kyc_status)} />
-          <KycRow label="KYC Onboarding" value={approvedLabel(compliance.review_status)} />
-          <KycRow label="KYC Fase II" value="—" muted />
-          <KycRow label="KYC Fase III" value="—" muted />
+          <KycRow label="KYC Fase I" value={approvedLabel(profile.kyc_stage_1)} muted={!profile.kyc_stage_1} />
+          <KycRow label="KYC Onboarding" value={approvedLabel(profile.kyc_status)} muted={!profile.kyc_status} />
+          <KycRow label="KYC Fase II" value={approvedLabel(profile.kyc_stage_2)} muted={!profile.kyc_stage_2} />
+          <KycRow label="KYC Fase III" value={approvedLabel(profile.kyc_stage_3)} muted={!profile.kyc_stage_3} />
           <div className="my-1.5 border-t border-[var(--g66-border-soft)]" />
           <Row label="Multijurisdicción" value={profile.country ? "1 jurisdicción" : "—"} />
           <Row label="Chile · principal" value={profile.country === "CL" ? approvedLabel(compliance.review_status) : "—"} />

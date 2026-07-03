@@ -87,9 +87,9 @@ REDSHIFT_DATA_API_TIMEOUT_SECONDS=30
 
 `REDSHIFT_SECRET_ARN` es obligatorio para activar este primer corte real. Las
 credenciales AWS se resuelven mediante la cadena estándar de `boto3` y nunca deben
-guardarse en el repositorio. Si falta la configuración esencial, Account 360
-mantiene el mock. En modo real, los errores de Data API devuelven un `502`
-controlado sin exponer detalles sensibles ni el ARN.
+guardarse en el repositorio. En modo real, una configuración esencial incompleta
+o un error en la consulta principal produce un `502` controlado, sin exponer
+detalles sensibles ni el ARN.
 
 `ACCOUNT_360_USE_MOCK_DATA` es el único interruptor que habilita datos demo. Si
 su valor es `false`, una configuración incompleta o una falla de Redshift produce
@@ -97,13 +97,25 @@ un error controlado y nunca cambia silenciosamente al perfil mock. Reinicia
 Uvicorn después de modificar variables, porque el repositorio se selecciona al
 iniciar la aplicación.
 
-La primera consulta real usa `customer.customer` y filtra `customer_id` mediante
-el parámetro `:account_id` de Redshift Data API. Lee exclusivamente las columnas
-`customer_id`, `email`, `country`, `id_number`, `id_type`, `last_name`, `name`,
-`calling_code` y `phone_number`. Estas columnas reemplazan el perfil base; métricas,
-billeteras, productos, KYC, actividad y paneles laterales siguen siendo mock y la
-respuesta se identifica con `data_source=redshift_partial`. Si el cliente no existe
-en modo real, el endpoint responde `404`; no se inventa una identidad mock.
+La consulta principal usa `customer.customer` y filtra `customer_id` mediante el
+parámetro `:account_id` de Redshift Data API. Lee `customer_id`, `email`, `country`,
+`id_number`, `id_type`, `last_name`, `name`, `calling_code`, `phone_number`,
+`username`, `segmentation`, `is_company`, `kyc_stage_1`, `kyc_stage_2`,
+`kyc_stage_3`, `compliance_status` y `nationality`. Estas columnas reemplazan el
+perfil base. Si el cliente no existe en modo real, el endpoint responde `404`; no
+se inventa una identidad mock.
+
+Después de encontrar el perfil, Account 360 intenta enriquecerlo con consultas
+independientes: el plan activo desde `subscription.subscription`,
+`subscription.plan_country` y `subscription.plan_locale`; los últimos cinco
+movimientos y el conteo histórico desde `transaction.transaction`; y la versión de
+app/dispositivo desde `customer.device_info`. Todas usan `:account_id` como
+parámetro. Una falla secundaria se registra sin datos sensibles y deja solamente
+esa sección vacía o con `—`; no invalida el perfil existente.
+
+Billeteras, productos, historial KYC, beneficios, términos y los demás módulos aún
+sin fuente confirmada siguen siendo complemento mock. La respuesta se identifica
+con `data_source=redshift_partial` mientras dure esta integración progresiva.
 
 Ejemplos:
 
