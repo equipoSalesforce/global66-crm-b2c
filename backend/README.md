@@ -85,18 +85,25 @@ REDSHIFT_DATA_API_POLL_INTERVAL_SECONDS=0.5
 REDSHIFT_DATA_API_TIMEOUT_SECONDS=30
 ```
 
-`REDSHIFT_SECRET_ARN` puede quedar vacío cuando la identidad AWS activa está
-autorizada para usar credenciales temporales del cluster. Las credenciales AWS se
-resuelven mediante la cadena estándar de `boto3` y nunca deben guardarse en el
-repositorio. Si falta la configuración esencial o no hay credenciales disponibles,
-Account 360 mantiene el mock. Otros errores de Data API devuelven un `502`
-controlado sin exponer detalles sensibles.
+`REDSHIFT_SECRET_ARN` es obligatorio para activar este primer corte real. Las
+credenciales AWS se resuelven mediante la cadena estándar de `boto3` y nunca deben
+guardarse en el repositorio. Si falta la configuración esencial, Account 360
+mantiene el mock. En modo real, los errores de Data API devuelven un `502`
+controlado sin exponer detalles sensibles ni el ARN.
+
+`ACCOUNT_360_USE_MOCK_DATA` es el único interruptor que habilita datos demo. Si
+su valor es `false`, una configuración incompleta o una falla de Redshift produce
+un error controlado y nunca cambia silenciosamente al perfil mock. Reinicia
+Uvicorn después de modificar variables, porque el repositorio se selecciona al
+iniciar la aplicación.
 
 La primera consulta real usa `customer.customer` y filtra `customer_id` mediante
-un parámetro de Redshift Data API. Como las columnas finales aún deben confirmarse,
-`account_360_repository.py` contiene `CUSTOMER_COLUMN_MAP` con nombres candidatos.
-El resultado real reemplaza solo los datos de perfil que estén presentes; el resto
-de la vista sigue siendo mock y se identifica con `data_source=redshift_partial`.
+el parámetro `:account_id` de Redshift Data API. Lee exclusivamente las columnas
+`customer_id`, `email`, `country`, `id_number`, `id_type`, `last_name`, `name`,
+`calling_code` y `phone_number`. Estas columnas reemplazan el perfil base; métricas,
+billeteras, productos, KYC, actividad y paneles laterales siguen siendo mock y la
+respuesta se identifica con `data_source=redshift_partial`. Si el cliente no existe
+en modo real, el endpoint responde `404`; no se inventa una identidad mock.
 
 Ejemplos:
 

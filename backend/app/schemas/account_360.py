@@ -6,10 +6,14 @@ from pydantic import BaseModel, Field
 
 class AccountProfile(BaseModel):
     account_id: str
+    internal_id: Optional[str] = None
     full_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
     country: Optional[str] = None
+    document: Optional[str] = None
+    document_type: Optional[str] = None
+    document_number: Optional[str] = None
     customer_type: str
     plan: str
     status: str
