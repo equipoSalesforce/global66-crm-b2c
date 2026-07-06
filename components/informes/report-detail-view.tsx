@@ -1,0 +1,21 @@
+"use client";
+
+import { getReport, type ReportDefinition } from "@/lib/informes-api";
+import { runReport } from "@/lib/informes-engine";
+import { getReportField, getReportSourceAdapter } from "@/lib/informes-metadata-provider";
+import { ArrowLeft, Copy, Database, Filter, LayoutDashboard, Pencil, Sigma } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { ReportRunPreview, ReportVisibilityBadge } from "./report-ui";
+import { useReportSource } from "./use-report-source";
+
+export function ReportDetailView({ reportId }: { reportId: string }) {
+  const [report, setReport] = useState<ReportDefinition | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const sourceRevision = useReportSource(report?.source ?? "cases");
+  useEffect(() => { const id = window.setTimeout(() => { setReport(getReport(reportId)); setLoaded(true); }, 0); return () => window.clearTimeout(id); }, [reportId]);
+  if (!loaded) return <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-xs text-slate-500">Cargando informe…</div>;
+  if (!report) return <div className="rounded-xl border border-slate-200 bg-white p-10 text-center"><p className="font-bold">Informe no encontrado</p><Link href="/informes" className="mt-2 inline-block text-xs font-bold text-blue-600">Volver</Link></div>;
+  const source = getReportSourceAdapter(report.source).source; const result = runReport(report, sourceRevision);
+  return <div className="space-y-3 pb-6"><div className="text-[10px] font-semibold text-slate-500"><Link href="/informes">Informes</Link> › {report.name}</div><section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-start lg:justify-between"><div className="flex gap-3"><Link href="/informes" className="h-fit rounded-lg border border-slate-200 p-2 text-slate-500"><ArrowLeft className="h-4 w-4" /></Link><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-extrabold text-slate-950">{report.name}</h1><ReportVisibilityBadge visibility={report.visibility} /></div><p className="mt-1 text-xs text-slate-500">{report.description}</p><div className="mt-2 flex flex-wrap gap-3 text-[9px] font-bold uppercase text-slate-400"><span>{source.label}</span><span>{report.owner.name}</span><span>{new Date(report.updatedAt).toLocaleString("es-CL")}</span></div></div></div><div className="flex gap-2"><Link href={`/informes/nuevo?edit=${report.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600"><Pencil className="h-3.5 w-3.5" /> Editar</Link><Link href="/paneles" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white"><LayoutDashboard className="h-3.5 w-3.5" /> Usar en panel</Link></div></section><section className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl border border-slate-200 bg-white p-4"><Database className="h-4 w-4 text-cyan-600" /><p className="mt-2 text-[9px] font-bold uppercase text-slate-400">Fuente</p><p className="text-sm font-extrabold">{source.label}</p></div><div className="rounded-xl border border-slate-200 bg-white p-4"><Filter className="h-4 w-4 text-violet-600" /><p className="mt-2 text-[9px] font-bold uppercase text-slate-400">Filtros</p><p className="text-sm font-extrabold">{report.filters.length}</p></div><div className="rounded-xl border border-slate-200 bg-white p-4"><Sigma className="h-4 w-4 text-emerald-600" /><p className="mt-2 text-[9px] font-bold uppercase text-slate-400">Métrica</p><p className="text-sm font-extrabold">{report.metrics[0]?.label || "—"}</p></div></section><section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-3 flex justify-between"><div><h2 className="text-sm font-extrabold">Resultado ejecutado</h2><p className="text-[10px] text-slate-500">{result.totalRows} registros · límite {report.limit}</p></div><Copy className="h-4 w-4 text-slate-400" /></div><ReportRunPreview result={result} groupLabel={getReportField(report.source, report.groupBy[0]?.field || "")?.label} metricLabel={report.metrics[0]?.label || "Recuento de registros"} /></section></div>;
+}
