@@ -14,7 +14,9 @@ import {
   BarChart3,
   BookOpen,
   BriefcaseBusiness,
+  FileBarChart,
   Home,
+  LayoutDashboard,
   Mail,
   MessageCircle,
   Settings,
@@ -26,6 +28,8 @@ import {
 
 const navigationIconByHref: Record<string, LucideIcon> = {
   "/dashboard": Home,
+  "/paneles": LayoutDashboard,
+  "/informes": FileBarChart,
   "/casos": BriefcaseBusiness,
   "/clientes": UsersRound,
   "/cuentas": UsersRound,

@@ -241,6 +241,20 @@ export const navigationItems: NavigationItem[] = [
     roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
   },
   {
+    label: "Paneles",
+    href: "/paneles",
+    icon: "PN",
+    permission: "view_dashboard",
+    roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
+  },
+  {
+    label: "Informes",
+    href: "/informes",
+    icon: "IF",
+    permission: "view_dashboard",
+    roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
+  },
+  {
     label: "Casos",
     href: "/casos",
     icon: "CA",
@@ -478,6 +492,8 @@ export const defaultCaseFieldPermissions: Record<
 const menuOrderByRole: Record<AgentRole, string[]> = {
   AGENT: [
     "/dashboard",
+    "/paneles",
+    "/informes",
     "/casos",
     "/cuentas",
     "/agentes",
@@ -486,6 +502,8 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ],
   SUPERVISOR: [
     "/dashboard",
+    "/paneles",
+    "/informes",
     "/casos",
     "/cuentas",
     "/agentes",
@@ -496,6 +514,8 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ],
   COMPLIANCE: [
     "/dashboard",
+    "/paneles",
+    "/informes",
     "/casos",
     "/cuentas",
     "/conversaciones",
@@ -506,6 +526,8 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ],
   ADMIN: [
     "/dashboard",
+    "/paneles",
+    "/informes",
     "/casos",
     "/cuentas",
     "/agentes",
@@ -518,6 +540,8 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ],
   AUDITOR: [
     "/dashboard",
+    "/paneles",
+    "/informes",
     "/casos",
     "/cuentas",
     "/conversaciones",
