@@ -53,14 +53,27 @@ export type AccountWallet = {
 };
 
 export type AccountProductSummary = {
-  product_code: string;
-  product_name: string;
-  summary: string;
+  code: string;
+  label: string;
+  family: string;
+  movement_count: number;
   volume_usd: number;
-  active_count?: number | null;
-  last_activity_at?: string | null;
-  status: string;
-  detail_available: boolean;
+  last_transaction_at?: string | null;
+  transactions: AccountProductTransaction[];
+};
+
+export type AccountProductTransaction = {
+  transaction_id: string;
+  product_id?: string | null;
+  product?: string | null;
+  product_family?: string | null;
+  transaction_datetime: string;
+  customer_id: string;
+  origin_amount?: number | null;
+  origin_amount_usd?: number | null;
+  destination_amount?: number | null;
+  destination_amount_usd?: number | null;
+  origin_currency_destiny_currency?: string | null;
 };
 
 export type AccountActivityItem = {

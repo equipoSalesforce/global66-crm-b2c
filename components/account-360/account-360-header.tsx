@@ -52,11 +52,11 @@ function ProfileDatum({
 export function Account360Header({ account }: { account: Account360 }) {
   const { profile } = account;
   const latestProduct = [...account.products]
-    .filter((product) => product.last_activity_at)
+    .filter((product) => product.last_transaction_at)
     .sort(
       (left, right) =>
-        new Date(right.last_activity_at || 0).getTime() -
-        new Date(left.last_activity_at || 0).getTime(),
+        new Date(right.last_transaction_at || 0).getTime() -
+        new Date(left.last_transaction_at || 0).getTime(),
     )[0];
   const badges = account.badges.filter((badge) => badge.code !== "inactivity");
   const inactivity = account.badges.find((badge) => badge.code === "inactivity");
@@ -138,7 +138,7 @@ export function Account360Header({ account }: { account: Account360 }) {
           badge={{
             code: "last_product",
             label: "Último producto",
-            value: latestProduct?.product_name || "—",
+            value: latestProduct?.label || "—",
             tone: "neutral",
           }}
         />

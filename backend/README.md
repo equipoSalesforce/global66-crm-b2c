@@ -112,12 +112,19 @@ movimientos y el conteo histórico desde `transaction.transaction`; y la versió
 app/dispositivo desde `customer.device_info`. Todas usan `:account_id` como
 parámetro. Una falla secundaria se registra sin datos sensibles y deja solamente
 esa sección vacía o con `—`; no invalida el perfil existente. Las transacciones
-recientes alimentan tanto la actividad unificada como el detalle desplegable de
-Remesa. El conteo histórico queda disponible en `metrics.transactions_count`.
+recientes alimentan la actividad unificada. El conteo histórico queda disponible
+en `metrics.transactions_count`.
 
-Billeteras, productos, historial KYC, beneficios, términos y los demás módulos aún
-sin fuente confirmada siguen siendo complemento mock. La respuesta se identifica
-con `data_source=redshift_partial` mientras dure esta integración progresiva.
+Productos se obtiene de `datawarehouse.b2x_products.fact_transaction`, unido por
+`product_id` con `datawarehouse.dimension.dim_product`. La consulta trae hasta 200
+movimientos recientes y los agrupa por `product_family`; cada grupo incluye conteo,
+suma de `origin_amount_usd`, última fecha y sus transacciones ordenadas. Si esta
+consulta complementaria falla, el perfil sigue respondiendo y `products` queda
+vacío, sin recuperar productos demo silenciosamente.
+
+Billeteras, historial KYC, beneficios, términos y los demás módulos aún sin fuente
+confirmada siguen siendo complemento mock. La respuesta se identifica con
+`data_source=redshift_partial` mientras dure esta integración progresiva.
 
 Ejemplos:
 
@@ -126,6 +133,7 @@ curl http://localhost:8000/accounts/demo-account/360
 curl http://localhost:8000/accounts/demo-account/products/card
 ```
 
-Los módulos de Remesa, P2P, Exchange, Tarjeta, Pagos y Compras tarjeta se
-conectarán progresivamente a sus propios schemas. El endpoint de detalle ya separa
-cada producto mediante `product_code`, sin asumir un schema global único.
+La respuesta de `/accounts/{account_id}/360` expone Remesa, P2P, Exchange, Pagos y
+Compras tarjeta con el contrato `code`, `label`, `family`, `movement_count`,
+`volume_usd`, `last_transaction_at` y `transactions`. Familias nuevas se publican
+con un código estable y un label humanizado, sin requerir cambios en el endpoint.

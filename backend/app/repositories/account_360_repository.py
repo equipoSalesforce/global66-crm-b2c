@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Protocol
 
@@ -20,6 +22,7 @@ from app.schemas.account_360 import (
     AccountKycHistoryItem,
     AccountProductDetailResponse,
     AccountProductSummary,
+    AccountProductTransaction,
     AccountProfile,
     AccountSummaryMetrics,
     AccountTermsItem,
@@ -103,13 +106,33 @@ ORDER BY date_version DESC
 LIMIT 1
 """.strip()
 
-SUPPORTED_PRODUCT_CODES = {
-    "remittance",
-    "p2p",
-    "exchange",
-    "card",
-    "payments",
-    "card_purchases",
+ACCOUNT_PRODUCT_TRANSACTIONS_SQL = """
+SELECT
+    ft.transaction_id,
+    ft.product_id,
+    dp.product_family,
+    dp.product,
+    ft.transaction_datetime,
+    ft.customer_id,
+    ft.origin_amount,
+    ft.origin_amount_usd,
+    ft.destination_amount,
+    ft.destination_amount_usd,
+    ft.origin_currency_destiny_currency
+FROM datawarehouse.b2x_products.fact_transaction ft
+LEFT JOIN datawarehouse.dimension.dim_product dp
+    ON ft.product_id = dp.product_id
+WHERE ft.customer_id = :account_id
+ORDER BY ft.transaction_datetime DESC
+LIMIT 200
+""".strip()
+
+PRODUCT_FAMILY_VISUALS = {
+    "transferencia": ("remesa", "Remesa", "transferencia"),
+    "p2p": ("p2p", "P2P", "P2P"),
+    "exchange": ("exchange", "Exchange", "exchange"),
+    "pago": ("pagos", "Pagos", "Pago"),
+    "card": ("compras_tarjeta", "Compras tarjeta", "Card"),
 }
 
 logger = logging.getLogger(__name__)
@@ -208,6 +231,7 @@ class RedshiftAccount360Repository:
         response.profile.plan = "—"
         response.profile.segment = "—"
         response.activity = []
+        response.products = []
         response.metrics.transactions_count = None
         response.device = AccountDeviceSummary(security_status="—")
 
@@ -224,6 +248,10 @@ class RedshiftAccount360Repository:
         )
         if transaction_rows is not None:
             response.activity = _map_transactions(transaction_rows)
+
+        product_rows = self.get_account_product_transactions(account_id)
+        if product_rows is not None:
+            response.products = build_account_products_from_transactions(product_rows)
 
         count_rows = self._execute_optional(
             TRANSACTION_COUNT_SQL,
@@ -255,6 +283,23 @@ class RedshiftAccount360Repository:
         if not rows:
             return None
         return _string_value(rows[0].get("segmentation"))
+
+    def get_account_product_transactions(
+        self,
+        account_id: str,
+    ) -> Optional[list[Dict[str, Any]]]:
+        return self._execute_optional(
+            ACCOUNT_PRODUCT_TRANSACTIONS_SQL,
+            account_id,
+            "account product transactions",
+        )
+
+    def get_account_products_summary(
+        self,
+        account_id: str,
+    ) -> list[AccountProductSummary]:
+        rows = self.get_account_product_transactions(account_id)
+        return build_account_products_from_transactions(rows or [])
 
     def _execute_optional(
         self,
@@ -430,6 +475,90 @@ def _float_value(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _product_family_metadata(family: Optional[str]) -> tuple[str, str, str]:
+    normalized_family = _string_value(family) or "sin categoría"
+    known = PRODUCT_FAMILY_VISUALS.get(normalized_family.casefold())
+    if known:
+        return known
+
+    ascii_family = unicodedata.normalize("NFKD", normalized_family).encode(
+        "ascii", "ignore"
+    ).decode("ascii")
+    code = re.sub(r"[^a-z0-9]+", "_", ascii_family.casefold()).strip("_")
+    return code or "sin_categoria", normalized_family.replace("_", " ").title(), normalized_family
+
+
+def build_account_products_from_transactions(
+    rows: list[Dict[str, Any]],
+) -> list[AccountProductSummary]:
+    grouped: Dict[str, Dict[str, Any]] = {
+        code: {
+            "code": code,
+            "label": label,
+            "family": family,
+            "transactions": [],
+        }
+        for code, label, family in PRODUCT_FAMILY_VISUALS.values()
+    }
+
+    for row in rows:
+        transaction_id = _string_value(row.get("transaction_id"))
+        customer_id = _string_value(row.get("customer_id"))
+        transaction_datetime = row.get("transaction_datetime")
+        if not transaction_id or not customer_id or not transaction_datetime:
+            logger.warning("Account 360 skipped an invalid product transaction row")
+            continue
+
+        code, label, family = _product_family_metadata(row.get("product_family"))
+        try:
+            transaction = AccountProductTransaction(
+                transaction_id=transaction_id,
+                product_id=_string_value(row.get("product_id")),
+                product=_string_value(row.get("product")),
+                product_family=family,
+                transaction_datetime=transaction_datetime,
+                customer_id=customer_id,
+                origin_amount=_float_value(row.get("origin_amount")),
+                origin_amount_usd=_float_value(row.get("origin_amount_usd")),
+                destination_amount=_float_value(row.get("destination_amount")),
+                destination_amount_usd=_float_value(row.get("destination_amount_usd")),
+                origin_currency_destiny_currency=_string_value(
+                    row.get("origin_currency_destiny_currency")
+                ),
+            )
+        except (TypeError, ValueError, ValidationError):
+            logger.warning("Account 360 skipped an invalid product transaction row")
+            continue
+
+        group = grouped.setdefault(
+            code,
+            {"code": code, "label": label, "family": family, "transactions": []},
+        )
+        group["transactions"].append(transaction)
+
+    products: list[AccountProductSummary] = []
+    for group in grouped.values():
+        transactions = sorted(
+            group["transactions"],
+            key=lambda item: item.transaction_datetime,
+            reverse=True,
+        )
+        products.append(
+            AccountProductSummary(
+                code=group["code"],
+                label=group["label"],
+                family=group["family"],
+                movement_count=len(transactions),
+                volume_usd=sum(item.origin_amount_usd or 0 for item in transactions),
+                last_transaction_at=(
+                    transactions[0].transaction_datetime if transactions else None
+                ),
+                transactions=transactions,
+            )
+        )
+    return products
 
 
 def _map_transactions(rows: list[Dict[str, Any]]) -> list[AccountActivityItem]:
@@ -623,24 +752,22 @@ def _build_mock_account_360(account_id: str) -> Account360Response:
 
 def _mock_products() -> list[AccountProductSummary]:
     values = [
-        ("remittance", "Remesa", "Transferencias internacionales", 82450.30, 18, "ACTIVE"),
-        ("p2p", "P2P", "Envíos entre usuarios", 12480.00, 9, "ACTIVE"),
-        ("exchange", "Exchange", "Operaciones de cambio", 96300.75, 31, "ACTIVE"),
-        ("card", "Tarjeta", "Tarjeta física y virtual", 43620.42, 2, "ACTIVE"),
-        ("payments", "Pagos", "Pagos de servicios y comercios", 18940.11, 14, "ACTIVE"),
-        ("card_purchases", "Compras tarjeta", "Compras nacionales e internacionales", 31138.60, 76, "ACTIVE"),
+        ("remesa", "Remesa", "transferencia", 82450.30, 18),
+        ("p2p", "P2P", "P2P", 12480.00, 9),
+        ("exchange", "Exchange", "exchange", 96300.75, 31),
+        ("pagos", "Pagos", "Pago", 18940.11, 14),
+        ("compras_tarjeta", "Compras tarjeta", "Card", 31138.60, 76),
     ]
     return [
         AccountProductSummary(
-            product_code=code,
-            product_name=name,
-            summary=summary,
+            code=code,
+            label=name,
+            family=family,
+            movement_count=count,
             volume_usd=volume,
-            active_count=count,
-            last_activity_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
-            status=status,
+            last_transaction_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
         )
-        for code, name, summary, volume, count, status in values
+        for code, name, family, volume, count in values
     ]
 
 
@@ -686,14 +813,21 @@ def _build_mock_product_detail(
     account_id: str,
     product_code: str,
 ) -> Optional[AccountProductDetailResponse]:
-    if product_code not in SUPPORTED_PRODUCT_CODES:
+    legacy_codes = {
+        "remittance": "remesa",
+        "payments": "pagos",
+        "card_purchases": "compras_tarjeta",
+        "card": "compras_tarjeta",
+    }
+    normalized_code = legacy_codes.get(product_code, product_code)
+    if normalized_code not in {product.code for product in _mock_products()}:
         return None
 
     summary = next(
-        product for product in _mock_products() if product.product_code == product_code
+        product for product in _mock_products() if product.code == normalized_code
     )
     details_by_product: Dict[str, Dict[str, Any]] = {
-        "remittance": {
+        "remesa": {
             "destinations": ["CL", "PE", "CO"],
             "completed_transfers": 18,
             "average_ticket_usd": 4580.57,
@@ -708,17 +842,12 @@ def _build_mock_product_detail(
             "completed_exchanges": 31,
             "average_spread_bps": 42,
         },
-        "card": {
-            "physical_card_status": "ACTIVE",
-            "virtual_card_status": "ACTIVE",
-            "monthly_limit_usd": 5000,
-        },
-        "payments": {
+        "pagos": {
             "saved_services": 6,
             "scheduled_payments": 2,
             "successful_payments": 14,
         },
-        "card_purchases": {
+        "compras_tarjeta": {
             "approved_purchases": 76,
             "declined_purchases": 2,
             "international_share_percent": 34.5,
@@ -730,11 +859,11 @@ def _build_mock_product_detail(
 
     return AccountProductDetailResponse(
         account_id=account_id,
-        product_code=product_code,
-        product_name=summary.product_name,
-        status=summary.status,
-        summary=summary.summary,
-        details=details_by_product[product_code],
+        product_code=normalized_code,
+        product_name=summary.label,
+        status="ACTIVE",
+        summary=f"{summary.movement_count} movimientos",
+        details=details_by_product[normalized_code],
         recent_activity=activity,
         data_source="mock",
     )
