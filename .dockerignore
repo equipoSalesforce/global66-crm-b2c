@@ -2,6 +2,10 @@
 .gitignore
 .next
 node_modules
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+.venv-redshift
 npm-debug.log*
 .env*
 .DS_Store

@@ -172,10 +172,13 @@ export class Account360ApiError extends Error {
 }
 
 function fastApiBaseUrl() {
-  return (process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || "http://localhost:8000").replace(
-    /\/$/,
-    "",
-  );
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL;
+
+  if (configuredBaseUrl !== undefined) {
+    return configuredBaseUrl.replace(/\/$/, "");
+  }
+
+  return process.env.NODE_ENV === "development" ? "http://localhost:8000" : "";
 }
 
 async function requestJson<T>(url: string): Promise<T> {
