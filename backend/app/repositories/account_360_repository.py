@@ -1,12 +1,12 @@
 import logging
 import re
 import unicodedata
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Protocol
 
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
+from app.mocks.account_360 import build_mock_account_360, build_mock_product_detail
 from app.repositories.redshift_data_api_client import (
     RedshiftDataApiClient,
     RedshiftDataApiError,
@@ -15,18 +15,11 @@ from app.schemas.account_360 import (
     Account360Response,
     AccountActivityItem,
     AccountBadge,
-    AccountBankingSummary,
-    AccountBenefitsSummary,
-    AccountComplianceSummary,
     AccountDeviceSummary,
-    AccountKycHistoryItem,
     AccountProductDetailResponse,
     AccountProductSummary,
     AccountProductTransaction,
     AccountProfile,
-    AccountSummaryMetrics,
-    AccountTermsItem,
-    AccountWallet,
 )
 
 CUSTOMER_TABLE = "customer.customer"
@@ -156,14 +149,14 @@ class Account360Repository(Protocol):
 
 class MockAccount360Repository:
     def get_account_360(self, account_id: str) -> Account360Response:
-        return _build_mock_account_360(account_id)
+        return build_mock_account_360()
 
     def get_product_detail(
         self,
         account_id: str,
         product_code: str,
     ) -> Optional[AccountProductDetailResponse]:
-        return _build_mock_product_detail(account_id, product_code)
+        return build_mock_product_detail(product_code)
 
 
 class UnavailableAccount360Repository:
@@ -618,252 +611,3 @@ def _profile_badges(profile: AccountProfile) -> list[AccountBadge]:
             tone="warning",
         ),
     ]
-
-
-def _build_mock_account_360(account_id: str) -> Account360Response:
-    last_activity = datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc)
-    profile = AccountProfile(
-        account_id=account_id,
-        full_name="Cliente Demo Account 360",
-        email="account360@example.com",
-        phone="+56900000000",
-        country="CL",
-        customer_type="Persona",
-        plan="Premium",
-        status="ACTIVE",
-        kyc_status="VERIFIED",
-        created_at=datetime(2021, 4, 12, 12, 0, tzinfo=timezone.utc),
-        last_activity_at=last_activity,
-        days_without_activity=3,
-    )
-    activity = _mock_activity()
-
-    return Account360Response(
-        account_id=account_id,
-        data_source="mock",
-        profile=profile,
-        badges=_profile_badges(profile),
-        metrics=AccountSummaryMetrics(
-            total_balance_usd=12845.62,
-            historical_volume_usd=284930.18,
-            interactions_count=47,
-            attachments_count=12,
-        ),
-        wallets=[
-            AccountWallet(
-                currency="USD",
-                balance=8450.20,
-                available_balance=8240.20,
-                balance_usd=8450.20,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-            AccountWallet(
-                currency="CLP",
-                balance=3260000,
-                available_balance=3260000,
-                balance_usd=3487.70,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-            AccountWallet(
-                currency="EUR",
-                balance=840.50,
-                available_balance=840.50,
-                balance_usd=907.72,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-        ],
-        products=_mock_products(),
-        kyc_history=[
-            AccountKycHistoryItem(
-                event_id="kyc-003",
-                status="VERIFIED",
-                description="Revalidación documental aprobada",
-                occurred_at=datetime(2026, 2, 15, 14, 20, tzinfo=timezone.utc),
-                source="KYC_PROVIDER",
-            ),
-            AccountKycHistoryItem(
-                event_id="kyc-002",
-                status="IN_REVIEW",
-                description="Actualización de documento de identidad",
-                occurred_at=datetime(2026, 2, 14, 11, 5, tzinfo=timezone.utc),
-                source="MOBILE_APP",
-            ),
-            AccountKycHistoryItem(
-                event_id="kyc-001",
-                status="VERIFIED",
-                description="Verificación inicial completada",
-                occurred_at=datetime(2021, 4, 12, 12, 15, tzinfo=timezone.utc),
-                source="KYC_PROVIDER",
-            ),
-        ],
-        activity=activity,
-        compliance=AccountComplianceSummary(
-            risk_level="LOW",
-            pep_status="NOT_PEP",
-            sanctions_status="CLEAR",
-            review_status="APPROVED",
-            last_review_at=datetime(2026, 2, 15, 14, 20, tzinfo=timezone.utc),
-            next_review_at=datetime(2027, 2, 15, 14, 20, tzinfo=timezone.utc),
-            notes=["Sin alertas activas", "Perfil transaccional consistente"],
-        ),
-        banking=AccountBankingSummary(
-            bank_name="Banco Demo",
-            account_type="Cuenta corriente",
-            account_number_masked="**** 4821",
-            country="CL",
-            currency="CLP",
-            status="VERIFIED",
-        ),
-        benefits=AccountBenefitsSummary(
-            cashback_balance_usd=38.42,
-            accrued_interest_usd=12.18,
-            benefits_tier="Premium Plus",
-            updated_at=last_activity,
-        ),
-        device=AccountDeviceSummary(
-            platform="iOS",
-            app_version="8.4.1",
-            device_model="Dispositivo móvil demo",
-            last_login_at=last_activity,
-            last_ip_country="CL",
-            security_status="TRUSTED",
-        ),
-        terms=[
-            AccountTermsItem(
-                terms_code="general_terms",
-                terms_name="Términos generales",
-                version="2026.1",
-                status="ACCEPTED",
-                accepted_at=datetime(2026, 3, 2, 10, 30, tzinfo=timezone.utc),
-            ),
-            AccountTermsItem(
-                terms_code="privacy_policy",
-                terms_name="Política de privacidad",
-                version="2025.3",
-                status="ACCEPTED",
-                accepted_at=datetime(2025, 11, 18, 9, 15, tzinfo=timezone.utc),
-            ),
-        ],
-    )
-
-
-def _mock_products() -> list[AccountProductSummary]:
-    values = [
-        ("remesa", "Remesa", "transferencia", 82450.30, 18),
-        ("p2p", "P2P", "P2P", 12480.00, 9),
-        ("exchange", "Exchange", "exchange", 96300.75, 31),
-        ("pagos", "Pagos", "Pago", 18940.11, 14),
-        ("compras_tarjeta", "Compras tarjeta", "Card", 31138.60, 76),
-    ]
-    return [
-        AccountProductSummary(
-            code=code,
-            label=name,
-            family=family,
-            movement_count=count,
-            volume_usd=volume,
-            last_transaction_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
-        )
-        for code, name, family, volume, count in values
-    ]
-
-
-def _mock_activity() -> list[AccountActivityItem]:
-    return [
-        AccountActivityItem(
-            activity_id="activity-001",
-            activity_type="TRANSACTION",
-            title="Compra con tarjeta",
-            description="Compra internacional aprobada",
-            occurred_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
-            channel="CARD",
-            status="COMPLETED",
-            amount=128.40,
-            currency="USD",
-            product_code="card_purchases",
-        ),
-        AccountActivityItem(
-            activity_id="activity-002",
-            activity_type="EXCHANGE",
-            title="Cambio de moneda",
-            description="Conversión CLP a USD",
-            occurred_at=datetime(2026, 6, 27, 12, 10, tzinfo=timezone.utc),
-            channel="MOBILE_APP",
-            status="COMPLETED",
-            amount=1000,
-            currency="USD",
-            product_code="exchange",
-        ),
-        AccountActivityItem(
-            activity_id="activity-003",
-            activity_type="SUPPORT",
-            title="Interacción de soporte",
-            description="Consulta resuelta por agente",
-            occurred_at=datetime(2026, 6, 25, 17, 5, tzinfo=timezone.utc),
-            channel="CHAT",
-            status="RESOLVED",
-        ),
-    ]
-
-
-def _build_mock_product_detail(
-    account_id: str,
-    product_code: str,
-) -> Optional[AccountProductDetailResponse]:
-    legacy_codes = {
-        "remittance": "remesa",
-        "payments": "pagos",
-        "card_purchases": "compras_tarjeta",
-        "card": "compras_tarjeta",
-    }
-    normalized_code = legacy_codes.get(product_code, product_code)
-    if normalized_code not in {product.code for product in _mock_products()}:
-        return None
-
-    summary = next(
-        product for product in _mock_products() if product.code == normalized_code
-    )
-    details_by_product: Dict[str, Dict[str, Any]] = {
-        "remesa": {
-            "destinations": ["CL", "PE", "CO"],
-            "completed_transfers": 18,
-            "average_ticket_usd": 4580.57,
-        },
-        "p2p": {
-            "frequent_recipients": 4,
-            "completed_transfers": 9,
-            "average_ticket_usd": 1386.67,
-        },
-        "exchange": {
-            "preferred_pair": "CLP/USD",
-            "completed_exchanges": 31,
-            "average_spread_bps": 42,
-        },
-        "pagos": {
-            "saved_services": 6,
-            "scheduled_payments": 2,
-            "successful_payments": 14,
-        },
-        "compras_tarjeta": {
-            "approved_purchases": 76,
-            "declined_purchases": 2,
-            "international_share_percent": 34.5,
-        },
-    }
-    activity = [
-        item for item in _mock_activity() if item.product_code == product_code
-    ]
-
-    return AccountProductDetailResponse(
-        account_id=account_id,
-        product_code=normalized_code,
-        product_name=summary.label,
-        status="ACTIVE",
-        summary=f"{summary.movement_count} movimientos",
-        details=details_by_product[normalized_code],
-        recent_activity=activity,
-        data_source="mock",
-    )

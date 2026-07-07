@@ -25,8 +25,8 @@ curl http://localhost:8000/health
 curl http://localhost:8000/customers/demo-customer/summary
 curl http://localhost:8000/cases
 curl http://localhost:8000/cases/demo-case-001
-curl http://localhost:8000/accounts/demo-account/360
-curl http://localhost:8000/accounts/demo-account/products/card
+curl http://localhost:8000/accounts/DEMO-CUSTOMER-001/360
+curl http://localhost:8000/accounts/DEMO-CUSTOMER-001/products/compras_tarjeta
 ```
 
 La lista acepta los filtros `status`, `lifecycle_status`, `routing_status`,
@@ -71,6 +71,12 @@ Account 360 usa un mock completo por defecto, sin conectarse a AWS ni Redshift:
 ```dotenv
 ACCOUNT_360_USE_MOCK_DATA=true
 ```
+
+En este modo no se inicializa Redshift Data API, no se requieren variables
+`REDSHIFT_*` ni credenciales AWS, y cualquier ID solicitado devuelve la cuenta
+canónica `DEMO-CUSTOMER-001`. El fixture incluye perfil, billeteras, productos,
+resumen transaccional y cinco transacciones recientes, con
+`data_source="mock"`.
 
 Para habilitar el perfil base desde Redshift Data API, configura localmente:
 
@@ -129,8 +135,8 @@ confirmada siguen siendo complemento mock. La respuesta se identifica con
 Ejemplos:
 
 ```bash
-curl http://localhost:8000/accounts/demo-account/360
-curl http://localhost:8000/accounts/demo-account/products/card
+curl http://localhost:8000/accounts/DEMO-CUSTOMER-001/360
+curl http://localhost:8000/accounts/DEMO-CUSTOMER-001/products/compras_tarjeta
 ```
 
 La respuesta de `/accounts/{account_id}/360` expone Remesa, P2P, Exchange, Pagos y
