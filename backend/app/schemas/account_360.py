@@ -66,7 +66,8 @@ class AccountProductTransaction(BaseModel):
     origin_amount_usd: Optional[float] = None
     destination_amount: Optional[float] = None
     destination_amount_usd: Optional[float] = None
-    origin_currency_destiny_currency: Optional[str] = None
+    origin_currency: Optional[str] = None
+    destiny_currency: Optional[str] = None
 
 
 class AccountProductSummary(BaseModel):
@@ -76,6 +77,10 @@ class AccountProductSummary(BaseModel):
     movement_count: int
     volume_usd: float
     last_transaction_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    active_cards_count: Optional[int] = None
+    own_cards_count: Optional[int] = None
+    third_party_cards_count: Optional[int] = None
     transactions: List[AccountProductTransaction] = Field(default_factory=list)
 
 

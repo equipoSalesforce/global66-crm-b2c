@@ -59,6 +59,10 @@ export type AccountProductSummary = {
   movement_count: number;
   volume_usd: number;
   last_transaction_at?: string | null;
+  last_activity_at?: string | null;
+  active_cards_count?: number | null;
+  own_cards_count?: number | null;
+  third_party_cards_count?: number | null;
   transactions: AccountProductTransaction[];
 };
 
@@ -73,7 +77,8 @@ export type AccountProductTransaction = {
   origin_amount_usd?: number | null;
   destination_amount?: number | null;
   destination_amount_usd?: number | null;
-  origin_currency_destiny_currency?: string | null;
+  origin_currency?: string | null;
+  destiny_currency?: string | null;
 };
 
 export type AccountActivityItem = {

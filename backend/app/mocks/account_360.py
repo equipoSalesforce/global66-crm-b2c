@@ -204,6 +204,10 @@ def build_mock_product_detail(
             "movement_count": product.movement_count,
             "volume_usd": product.volume_usd,
             "last_transaction_at": product.last_transaction_at,
+            "last_activity_at": product.last_activity_at,
+            "active_cards_count": product.active_cards_count,
+            "own_cards_count": product.own_cards_count,
+            "third_party_cards_count": product.third_party_cards_count,
         },
         recent_activity=recent_activity,
         data_source="mock",
@@ -237,11 +241,11 @@ def _mock_badges(profile: AccountProfile) -> list[AccountBadge]:
 
 def _mock_transactions() -> list[AccountProductTransaction]:
     values = [
-        ("TX-DEMO-005", "prod-remesa", "transferencia", "Remesa internacional", datetime(2026, 7, 5, 16, 20, tzinfo=timezone.utc), 1250.0, 1250.0, 1180.0, 1275.4, "USD_EUR"),
-        ("TX-DEMO-004", "prod-exchange", "exchange", "Cambio de divisas", datetime(2026, 7, 3, 11, 10, tzinfo=timezone.utc), 850000.0, 895.2, 895.2, 895.2, "CLP_USD"),
-        ("TX-DEMO-003", "prod-p2p", "P2P", "Transferencia P2P", datetime(2026, 7, 1, 9, 35, tzinfo=timezone.utc), 200.0, 200.0, 200.0, 200.0, "USD_USD"),
-        ("TX-DEMO-002", "prod-pago", "Pago", "Pago de servicio", datetime(2026, 6, 29, 18, 5, tzinfo=timezone.utc), 75.5, 75.5, 75.5, 75.5, "USD_USD"),
-        ("TX-DEMO-001", "prod-card", "Card", "Compra con tarjeta", datetime(2026, 6, 27, 14, 45, tzinfo=timezone.utc), 129.9, 129.9, 129.9, 129.9, "USD_USD"),
+        ("TX-DEMO-005", "prod-remesa", "transferencia", "Remesa internacional", datetime(2026, 7, 5, 16, 20, tzinfo=timezone.utc), 1250.0, 1250.0, 1180.0, 1275.4, "USD", "EUR"),
+        ("TX-DEMO-004", "prod-exchange", "exchange", "Cambio de divisas", datetime(2026, 7, 3, 11, 10, tzinfo=timezone.utc), 850000.0, 895.2, 895.2, 895.2, "CLP", "USD"),
+        ("TX-DEMO-003", "prod-p2p", "P2P", "Transferencia P2P", datetime(2026, 7, 1, 9, 35, tzinfo=timezone.utc), 200.0, 200.0, 200.0, 200.0, "USD", "USD"),
+        ("TX-DEMO-002", "prod-pago", "Pago", "Pago de servicio", datetime(2026, 6, 29, 18, 5, tzinfo=timezone.utc), 75.5, 75.5, 75.5, 75.5, "USD", "USD"),
+        ("TX-DEMO-001", "prod-card", "Card", "Compra con tarjeta", datetime(2026, 6, 27, 14, 45, tzinfo=timezone.utc), 129.9, 129.9, 129.9, 129.9, "USD", "USD"),
     ]
     return [
         AccountProductTransaction(
@@ -255,9 +259,10 @@ def _mock_transactions() -> list[AccountProductTransaction]:
             origin_amount_usd=origin_amount_usd,
             destination_amount=destination_amount,
             destination_amount_usd=destination_amount_usd,
-            origin_currency_destiny_currency=currency_pair,
+            origin_currency=origin_currency,
+            destiny_currency=destiny_currency,
         )
-        for transaction_id, product_id, family, product, transaction_datetime, origin_amount, origin_amount_usd, destination_amount, destination_amount_usd, currency_pair in values
+        for transaction_id, product_id, family, product, transaction_datetime, origin_amount, origin_amount_usd, destination_amount, destination_amount_usd, origin_currency, destiny_currency in values
     ]
 
 
@@ -268,14 +273,17 @@ def _mock_products(
         ("remesa", "Remesa", "transferencia"),
         ("p2p", "P2P", "P2P"),
         ("exchange", "Exchange", "exchange"),
+        ("tarjeta", "Tarjeta", "Card"),
         ("pagos", "Pagos", "Pago"),
         ("compras_tarjeta", "Compras tarjeta", "Card"),
     ]
     products: list[AccountProductSummary] = []
     for code, label, family in definitions:
-        product_transactions = [
-            item for item in transactions if item.product_family == family
-        ]
+        product_transactions = (
+            []
+            if code == "tarjeta"
+            else [item for item in transactions if item.product_family == family]
+        )
         products.append(
             AccountProductSummary(
                 code=code,
@@ -288,6 +296,14 @@ def _mock_products(
                     if product_transactions
                     else None
                 ),
+                last_activity_at=(
+                    datetime(2026, 6, 26, tzinfo=timezone.utc)
+                    if code == "tarjeta"
+                    else None
+                ),
+                active_cards_count=5 if code == "tarjeta" else None,
+                own_cards_count=3 if code == "tarjeta" else None,
+                third_party_cards_count=2 if code == "tarjeta" else None,
                 transactions=product_transactions,
             )
         )
@@ -309,13 +325,18 @@ def _mock_activity(
             activity_id=item.transaction_id,
             activity_type="TRANSACTION",
             title=item.product or "Transacción",
-            description=item.origin_currency_destiny_currency,
+            description=_currency_pair(item.origin_currency, item.destiny_currency),
             occurred_at=item.transaction_datetime,
             channel="APP",
             status="COMPLETED",
             amount=item.origin_amount,
-            currency=(item.origin_currency_destiny_currency or "_").split("_")[0],
+            currency=item.origin_currency,
             product_code=code_by_family.get(item.product_family or ""),
         )
         for item in transactions
     ]
+
+
+def _currency_pair(origin: Optional[str], destiny: Optional[str]) -> Optional[str]:
+    values = [value for value in (origin, destiny) if value]
+    return "_".join(values) or None

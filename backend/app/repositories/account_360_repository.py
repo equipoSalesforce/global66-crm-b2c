@@ -111,7 +111,8 @@ SELECT
     ft.origin_amount_usd,
     ft.destination_amount,
     ft.destination_amount_usd,
-    ft.origin_currency_destiny_currency
+    ft.origin_currency,
+    ft.destiny_currency
 FROM datawarehouse.b2x_products.fact_transaction ft
 LEFT JOIN datawarehouse.dimension.dim_product dp
     ON ft.product_id = dp.product_id
@@ -495,8 +496,17 @@ def build_account_products_from_transactions(
         }
         for code, label, family in PRODUCT_FAMILY_VISUALS.values()
     }
+    grouped["tarjeta"] = {
+        "code": "tarjeta",
+        "label": "Tarjeta",
+        "family": "Card",
+        "transactions": [],
+    }
 
     for row in rows:
+        raw_family = _string_value(row.get("product_family"))
+        if raw_family and raw_family.casefold() == "tarjeta":
+            continue
         transaction_id = _string_value(row.get("transaction_id"))
         customer_id = _string_value(row.get("customer_id"))
         transaction_datetime = row.get("transaction_datetime")
@@ -517,9 +527,8 @@ def build_account_products_from_transactions(
                 origin_amount_usd=_float_value(row.get("origin_amount_usd")),
                 destination_amount=_float_value(row.get("destination_amount")),
                 destination_amount_usd=_float_value(row.get("destination_amount_usd")),
-                origin_currency_destiny_currency=_string_value(
-                    row.get("origin_currency_destiny_currency")
-                ),
+                origin_currency=_string_value(row.get("origin_currency")),
+                destiny_currency=_string_value(row.get("destiny_currency")),
             )
         except (TypeError, ValueError, ValidationError):
             logger.warning("Account 360 skipped an invalid product transaction row")
