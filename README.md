@@ -21,15 +21,34 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 Build the production image and run it locally:
 
 ```bash
-docker build -t global66-crm-b2c .
+docker build \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=... \
+  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
+  -t global66-crm-b2c .
 docker run --rm -p 3000:3000 global66-crm-b2c
 ```
+
+Both `NEXT_PUBLIC_*` values are public browser configuration embedded by Next.js
+at build time. Do not pass private Supabase credentials or service-role keys as
+build arguments.
 
 Open [http://localhost:3000](http://localhost:3000). Runtime configuration can be
 passed to `docker run` by the deployment environment; do not bake secrets into the
 image.
 
 `GET /api/health` provides the health check endpoint for the container and ALB.
+
+## FastAPI routing
+
+For local development, the frontend can target FastAPI directly:
+
+```dotenv
+NEXT_PUBLIC_FASTAPI_BASE_URL=http://localhost:8000
+```
+
+In AWS, omit `NEXT_PUBLIC_FASTAPI_BASE_URL` so Account 360 uses relative
+`/accounts/*` routes through the public ALB. The ALB is responsible for routing
+those requests to the FastAPI service.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

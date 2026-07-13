@@ -55,15 +55,33 @@ class AccountWallet(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class AccountProductTransaction(BaseModel):
+    transaction_id: str
+    product_id: Optional[str] = None
+    product: Optional[str] = None
+    product_family: Optional[str] = None
+    transaction_datetime: datetime
+    customer_id: str
+    origin_amount: Optional[float] = None
+    origin_amount_usd: Optional[float] = None
+    destination_amount: Optional[float] = None
+    destination_amount_usd: Optional[float] = None
+    origin_currency: Optional[str] = None
+    destiny_currency: Optional[str] = None
+
+
 class AccountProductSummary(BaseModel):
-    product_code: str
-    product_name: str
-    summary: str
+    code: str
+    label: str
+    family: str
+    movement_count: int
     volume_usd: float
-    active_count: Optional[int] = None
+    last_transaction_at: Optional[datetime] = None
     last_activity_at: Optional[datetime] = None
-    status: str
-    detail_available: bool = True
+    active_cards_count: Optional[int] = None
+    own_cards_count: Optional[int] = None
+    third_party_cards_count: Optional[int] = None
+    transactions: List[AccountProductTransaction] = Field(default_factory=list)
 
 
 class AccountKycHistoryItem(BaseModel):

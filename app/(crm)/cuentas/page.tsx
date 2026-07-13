@@ -1,18 +1,11 @@
-import { Account360ApiError, getAccount360 } from "@/lib/account-360-api";
+import { getAccountDirectory } from "@/lib/account-directory";
 import { ChevronRight, Search, UsersRound } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountsPage() {
-  let account = null;
-  let loadError = false;
-
-  try {
-    account = await getAccount360("demo-account");
-  } catch (error) {
-    loadError = error instanceof Account360ApiError;
-  }
+  const accounts = await getAccountDirectory();
 
   return (
     <div className="space-y-3 pb-4">
@@ -25,16 +18,19 @@ export default async function AccountsPage() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-[#e3e8f2] bg-white shadow-[0_2px_8px_rgb(15_23_42/0.03)]">
-        <div className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.8fr_auto] gap-3 border-b border-[var(--g66-border)] bg-slate-50 px-4 py-2 text-[9px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]"><span>Cuenta</span><span>Tipo</span><span>Estado KYC</span><span /></div>
-        {account ? (
-          <Link href={`/cuentas/${account.account_id}`} className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.8fr_auto] items-center gap-3 px-4 py-3 hover:bg-blue-50/40">
-            <div className="min-w-0"><p className="truncate text-sm font-extrabold text-[var(--g66-text-primary)]">{account.profile.full_name || "Cuenta sin nombre"}</p><p className="mt-0.5 truncate text-[10px] text-[var(--g66-text-muted)]">{account.account_id} · {account.profile.email || "Email no disponible"}</p></div>
-            <span className="text-xs font-semibold text-[var(--g66-text-secondary)]">{account.profile.customer_type || "—"}</span>
-            <span className="w-fit rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-bold text-emerald-700">{account.profile.kyc_status || "—"}</span>
-            <ChevronRight className="h-4 w-4 text-slate-400" />
-          </Link>
+        <div className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.7fr_0.8fr_auto] gap-3 border-b border-[var(--g66-border)] bg-slate-50 px-4 py-2 text-[9px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]"><span>Cuenta</span><span>Tipo</span><span>Segmento</span><span>Estado KYC</span><span /></div>
+        {accounts.length > 0 ? (
+          accounts.map((account) => (
+            <Link key={account.accountId} href={`/cuentas/${account.accountId}`} className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.7fr_0.8fr_auto] items-center gap-3 px-4 py-3 hover:bg-blue-50/40">
+              <div className="min-w-0"><p className="truncate text-sm font-extrabold text-[var(--g66-text-primary)]">{account.fullName}</p><p className="mt-0.5 truncate text-[10px] text-[var(--g66-text-muted)]">{account.accountId} · {account.email}</p></div>
+              <span className="text-xs font-semibold text-[var(--g66-text-secondary)]">{account.accountType}</span>
+              <span className="text-xs font-semibold text-[var(--g66-text-secondary)]">{account.segment}</span>
+              <span className="w-fit rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-bold text-emerald-700">{account.kycStatus}</span>
+              <ChevronRight className="h-4 w-4 text-slate-400" />
+            </Link>
+          ))
         ) : (
-          <p className="px-4 py-8 text-center text-xs text-[var(--g66-text-muted)]">{loadError ? "No fue posible cargar las cuentas en este momento." : "No hay cuentas disponibles."}</p>
+          <p className="px-4 py-8 text-center text-xs text-[var(--g66-text-muted)]">No hay cuentas disponibles.</p>
         )}
       </section>
     </div>

@@ -56,7 +56,7 @@ export default async function Account360Page({
             accountId={account.account_id}
             movements={account.activity}
           />
-          <AccountProducts accountId={account.account_id} products={account.products} />
+          <AccountProducts products={account.products} />
           <AccountKycHistory items={account.kyc_history} />
           <AccountActivityTimeline items={account.activity} />
         </main>

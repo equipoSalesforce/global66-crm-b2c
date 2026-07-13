@@ -53,14 +53,32 @@ export type AccountWallet = {
 };
 
 export type AccountProductSummary = {
-  product_code: string;
-  product_name: string;
-  summary: string;
+  code: string;
+  label: string;
+  family: string;
+  movement_count: number;
   volume_usd: number;
-  active_count?: number | null;
+  last_transaction_at?: string | null;
   last_activity_at?: string | null;
-  status: string;
-  detail_available: boolean;
+  active_cards_count?: number | null;
+  own_cards_count?: number | null;
+  third_party_cards_count?: number | null;
+  transactions: AccountProductTransaction[];
+};
+
+export type AccountProductTransaction = {
+  transaction_id: string;
+  product_id?: string | null;
+  product?: string | null;
+  product_family?: string | null;
+  transaction_datetime: string;
+  customer_id: string;
+  origin_amount?: number | null;
+  origin_amount_usd?: number | null;
+  destination_amount?: number | null;
+  destination_amount_usd?: number | null;
+  origin_currency?: string | null;
+  destiny_currency?: string | null;
 };
 
 export type AccountActivityItem = {
@@ -154,10 +172,13 @@ export class Account360ApiError extends Error {
 }
 
 function fastApiBaseUrl() {
-  return (process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || "http://localhost:8000").replace(
-    /\/$/,
-    "",
-  );
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL;
+
+  if (configuredBaseUrl !== undefined) {
+    return configuredBaseUrl.replace(/\/$/, "");
+  }
+
+  return process.env.NODE_ENV === "development" ? "http://localhost:8000" : "";
 }
 
 async function requestJson<T>(url: string): Promise<T> {

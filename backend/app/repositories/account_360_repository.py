@@ -1,10 +1,12 @@
 import logging
-from datetime import datetime, timezone
+import re
+import unicodedata
 from typing import Any, Dict, Optional, Protocol
 
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
+from app.mocks.account_360 import build_mock_account_360, build_mock_product_detail
 from app.repositories.redshift_data_api_client import (
     RedshiftDataApiClient,
     RedshiftDataApiError,
@@ -13,17 +15,11 @@ from app.schemas.account_360 import (
     Account360Response,
     AccountActivityItem,
     AccountBadge,
-    AccountBankingSummary,
-    AccountBenefitsSummary,
-    AccountComplianceSummary,
     AccountDeviceSummary,
-    AccountKycHistoryItem,
     AccountProductDetailResponse,
     AccountProductSummary,
+    AccountProductTransaction,
     AccountProfile,
-    AccountSummaryMetrics,
-    AccountTermsItem,
-    AccountWallet,
 )
 
 CUSTOMER_TABLE = "customer.customer"
@@ -103,13 +99,34 @@ ORDER BY date_version DESC
 LIMIT 1
 """.strip()
 
-SUPPORTED_PRODUCT_CODES = {
-    "remittance",
-    "p2p",
-    "exchange",
-    "card",
-    "payments",
-    "card_purchases",
+ACCOUNT_PRODUCT_TRANSACTIONS_SQL = """
+SELECT
+    ft.transaction_id,
+    ft.product_id,
+    dp.product_family,
+    dp.product,
+    ft.transaction_datetime,
+    ft.customer_id,
+    ft.origin_amount,
+    ft.origin_amount_usd,
+    ft.destination_amount,
+    ft.destination_amount_usd,
+    ft.origin_currency,
+    ft.destiny_currency
+FROM datawarehouse.b2x_products.fact_transaction ft
+LEFT JOIN datawarehouse.dimension.dim_product dp
+    ON ft.product_id = dp.product_id
+WHERE ft.customer_id = :account_id
+ORDER BY ft.transaction_datetime DESC
+LIMIT 200
+""".strip()
+
+PRODUCT_FAMILY_VISUALS = {
+    "transferencia": ("remesa", "Remesa", "transferencia"),
+    "p2p": ("p2p", "P2P", "P2P"),
+    "exchange": ("exchange", "Exchange", "exchange"),
+    "pago": ("pagos", "Pagos", "Pago"),
+    "card": ("compras_tarjeta", "Compras tarjeta", "Card"),
 }
 
 logger = logging.getLogger(__name__)
@@ -133,14 +150,14 @@ class Account360Repository(Protocol):
 
 class MockAccount360Repository:
     def get_account_360(self, account_id: str) -> Account360Response:
-        return _build_mock_account_360(account_id)
+        return build_mock_account_360()
 
     def get_product_detail(
         self,
         account_id: str,
         product_code: str,
     ) -> Optional[AccountProductDetailResponse]:
-        return _build_mock_product_detail(account_id, product_code)
+        return build_mock_product_detail(product_code)
 
 
 class UnavailableAccount360Repository:
@@ -208,6 +225,7 @@ class RedshiftAccount360Repository:
         response.profile.plan = "—"
         response.profile.segment = "—"
         response.activity = []
+        response.products = []
         response.metrics.transactions_count = None
         response.device = AccountDeviceSummary(security_status="—")
 
@@ -224,6 +242,10 @@ class RedshiftAccount360Repository:
         )
         if transaction_rows is not None:
             response.activity = _map_transactions(transaction_rows)
+
+        product_rows = self.get_account_product_transactions(account_id)
+        if product_rows is not None:
+            response.products = build_account_products_from_transactions(product_rows)
 
         count_rows = self._execute_optional(
             TRANSACTION_COUNT_SQL,
@@ -255,6 +277,23 @@ class RedshiftAccount360Repository:
         if not rows:
             return None
         return _string_value(rows[0].get("segmentation"))
+
+    def get_account_product_transactions(
+        self,
+        account_id: str,
+    ) -> Optional[list[Dict[str, Any]]]:
+        return self._execute_optional(
+            ACCOUNT_PRODUCT_TRANSACTIONS_SQL,
+            account_id,
+            "account product transactions",
+        )
+
+    def get_account_products_summary(
+        self,
+        account_id: str,
+    ) -> list[AccountProductSummary]:
+        rows = self.get_account_product_transactions(account_id)
+        return build_account_products_from_transactions(rows or [])
 
     def _execute_optional(
         self,
@@ -432,6 +471,98 @@ def _float_value(value: Any) -> Optional[float]:
         return None
 
 
+def _product_family_metadata(family: Optional[str]) -> tuple[str, str, str]:
+    normalized_family = _string_value(family) or "sin categoría"
+    known = PRODUCT_FAMILY_VISUALS.get(normalized_family.casefold())
+    if known:
+        return known
+
+    ascii_family = unicodedata.normalize("NFKD", normalized_family).encode(
+        "ascii", "ignore"
+    ).decode("ascii")
+    code = re.sub(r"[^a-z0-9]+", "_", ascii_family.casefold()).strip("_")
+    return code or "sin_categoria", normalized_family.replace("_", " ").title(), normalized_family
+
+
+def build_account_products_from_transactions(
+    rows: list[Dict[str, Any]],
+) -> list[AccountProductSummary]:
+    grouped: Dict[str, Dict[str, Any]] = {
+        code: {
+            "code": code,
+            "label": label,
+            "family": family,
+            "transactions": [],
+        }
+        for code, label, family in PRODUCT_FAMILY_VISUALS.values()
+    }
+    grouped["tarjeta"] = {
+        "code": "tarjeta",
+        "label": "Tarjeta",
+        "family": "Card",
+        "transactions": [],
+    }
+
+    for row in rows:
+        raw_family = _string_value(row.get("product_family"))
+        if raw_family and raw_family.casefold() == "tarjeta":
+            continue
+        transaction_id = _string_value(row.get("transaction_id"))
+        customer_id = _string_value(row.get("customer_id"))
+        transaction_datetime = row.get("transaction_datetime")
+        if not transaction_id or not customer_id or not transaction_datetime:
+            logger.warning("Account 360 skipped an invalid product transaction row")
+            continue
+
+        code, label, family = _product_family_metadata(row.get("product_family"))
+        try:
+            transaction = AccountProductTransaction(
+                transaction_id=transaction_id,
+                product_id=_string_value(row.get("product_id")),
+                product=_string_value(row.get("product")),
+                product_family=family,
+                transaction_datetime=transaction_datetime,
+                customer_id=customer_id,
+                origin_amount=_float_value(row.get("origin_amount")),
+                origin_amount_usd=_float_value(row.get("origin_amount_usd")),
+                destination_amount=_float_value(row.get("destination_amount")),
+                destination_amount_usd=_float_value(row.get("destination_amount_usd")),
+                origin_currency=_string_value(row.get("origin_currency")),
+                destiny_currency=_string_value(row.get("destiny_currency")),
+            )
+        except (TypeError, ValueError, ValidationError):
+            logger.warning("Account 360 skipped an invalid product transaction row")
+            continue
+
+        group = grouped.setdefault(
+            code,
+            {"code": code, "label": label, "family": family, "transactions": []},
+        )
+        group["transactions"].append(transaction)
+
+    products: list[AccountProductSummary] = []
+    for group in grouped.values():
+        transactions = sorted(
+            group["transactions"],
+            key=lambda item: item.transaction_datetime,
+            reverse=True,
+        )
+        products.append(
+            AccountProductSummary(
+                code=group["code"],
+                label=group["label"],
+                family=group["family"],
+                movement_count=len(transactions),
+                volume_usd=sum(item.origin_amount_usd or 0 for item in transactions),
+                last_transaction_at=(
+                    transactions[0].transaction_datetime if transactions else None
+                ),
+                transactions=transactions,
+            )
+        )
+    return products
+
+
 def _map_transactions(rows: list[Dict[str, Any]]) -> list[AccountActivityItem]:
     activities: list[AccountActivityItem] = []
     for row in rows:
@@ -489,252 +620,3 @@ def _profile_badges(profile: AccountProfile) -> list[AccountBadge]:
             tone="warning",
         ),
     ]
-
-
-def _build_mock_account_360(account_id: str) -> Account360Response:
-    last_activity = datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc)
-    profile = AccountProfile(
-        account_id=account_id,
-        full_name="Cliente Demo Account 360",
-        email="account360@example.com",
-        phone="+56900000000",
-        country="CL",
-        customer_type="Persona",
-        plan="Premium",
-        status="ACTIVE",
-        kyc_status="VERIFIED",
-        created_at=datetime(2021, 4, 12, 12, 0, tzinfo=timezone.utc),
-        last_activity_at=last_activity,
-        days_without_activity=3,
-    )
-    activity = _mock_activity()
-
-    return Account360Response(
-        account_id=account_id,
-        data_source="mock",
-        profile=profile,
-        badges=_profile_badges(profile),
-        metrics=AccountSummaryMetrics(
-            total_balance_usd=12845.62,
-            historical_volume_usd=284930.18,
-            interactions_count=47,
-            attachments_count=12,
-        ),
-        wallets=[
-            AccountWallet(
-                currency="USD",
-                balance=8450.20,
-                available_balance=8240.20,
-                balance_usd=8450.20,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-            AccountWallet(
-                currency="CLP",
-                balance=3260000,
-                available_balance=3260000,
-                balance_usd=3487.70,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-            AccountWallet(
-                currency="EUR",
-                balance=840.50,
-                available_balance=840.50,
-                balance_usd=907.72,
-                status="ACTIVE",
-                updated_at=last_activity,
-            ),
-        ],
-        products=_mock_products(),
-        kyc_history=[
-            AccountKycHistoryItem(
-                event_id="kyc-003",
-                status="VERIFIED",
-                description="Revalidación documental aprobada",
-                occurred_at=datetime(2026, 2, 15, 14, 20, tzinfo=timezone.utc),
-                source="KYC_PROVIDER",
-            ),
-            AccountKycHistoryItem(
-                event_id="kyc-002",
-                status="IN_REVIEW",
-                description="Actualización de documento de identidad",
-                occurred_at=datetime(2026, 2, 14, 11, 5, tzinfo=timezone.utc),
-                source="MOBILE_APP",
-            ),
-            AccountKycHistoryItem(
-                event_id="kyc-001",
-                status="VERIFIED",
-                description="Verificación inicial completada",
-                occurred_at=datetime(2021, 4, 12, 12, 15, tzinfo=timezone.utc),
-                source="KYC_PROVIDER",
-            ),
-        ],
-        activity=activity,
-        compliance=AccountComplianceSummary(
-            risk_level="LOW",
-            pep_status="NOT_PEP",
-            sanctions_status="CLEAR",
-            review_status="APPROVED",
-            last_review_at=datetime(2026, 2, 15, 14, 20, tzinfo=timezone.utc),
-            next_review_at=datetime(2027, 2, 15, 14, 20, tzinfo=timezone.utc),
-            notes=["Sin alertas activas", "Perfil transaccional consistente"],
-        ),
-        banking=AccountBankingSummary(
-            bank_name="Banco Demo",
-            account_type="Cuenta corriente",
-            account_number_masked="**** 4821",
-            country="CL",
-            currency="CLP",
-            status="VERIFIED",
-        ),
-        benefits=AccountBenefitsSummary(
-            cashback_balance_usd=38.42,
-            accrued_interest_usd=12.18,
-            benefits_tier="Premium Plus",
-            updated_at=last_activity,
-        ),
-        device=AccountDeviceSummary(
-            platform="iOS",
-            app_version="8.4.1",
-            device_model="Dispositivo móvil demo",
-            last_login_at=last_activity,
-            last_ip_country="CL",
-            security_status="TRUSTED",
-        ),
-        terms=[
-            AccountTermsItem(
-                terms_code="general_terms",
-                terms_name="Términos generales",
-                version="2026.1",
-                status="ACCEPTED",
-                accepted_at=datetime(2026, 3, 2, 10, 30, tzinfo=timezone.utc),
-            ),
-            AccountTermsItem(
-                terms_code="privacy_policy",
-                terms_name="Política de privacidad",
-                version="2025.3",
-                status="ACCEPTED",
-                accepted_at=datetime(2025, 11, 18, 9, 15, tzinfo=timezone.utc),
-            ),
-        ],
-    )
-
-
-def _mock_products() -> list[AccountProductSummary]:
-    values = [
-        ("remittance", "Remesa", "Transferencias internacionales", 82450.30, 18, "ACTIVE"),
-        ("p2p", "P2P", "Envíos entre usuarios", 12480.00, 9, "ACTIVE"),
-        ("exchange", "Exchange", "Operaciones de cambio", 96300.75, 31, "ACTIVE"),
-        ("card", "Tarjeta", "Tarjeta física y virtual", 43620.42, 2, "ACTIVE"),
-        ("payments", "Pagos", "Pagos de servicios y comercios", 18940.11, 14, "ACTIVE"),
-        ("card_purchases", "Compras tarjeta", "Compras nacionales e internacionales", 31138.60, 76, "ACTIVE"),
-    ]
-    return [
-        AccountProductSummary(
-            product_code=code,
-            product_name=name,
-            summary=summary,
-            volume_usd=volume,
-            active_count=count,
-            last_activity_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
-            status=status,
-        )
-        for code, name, summary, volume, count, status in values
-    ]
-
-
-def _mock_activity() -> list[AccountActivityItem]:
-    return [
-        AccountActivityItem(
-            activity_id="activity-001",
-            activity_type="TRANSACTION",
-            title="Compra con tarjeta",
-            description="Compra internacional aprobada",
-            occurred_at=datetime(2026, 6, 29, 15, 40, tzinfo=timezone.utc),
-            channel="CARD",
-            status="COMPLETED",
-            amount=128.40,
-            currency="USD",
-            product_code="card_purchases",
-        ),
-        AccountActivityItem(
-            activity_id="activity-002",
-            activity_type="EXCHANGE",
-            title="Cambio de moneda",
-            description="Conversión CLP a USD",
-            occurred_at=datetime(2026, 6, 27, 12, 10, tzinfo=timezone.utc),
-            channel="MOBILE_APP",
-            status="COMPLETED",
-            amount=1000,
-            currency="USD",
-            product_code="exchange",
-        ),
-        AccountActivityItem(
-            activity_id="activity-003",
-            activity_type="SUPPORT",
-            title="Interacción de soporte",
-            description="Consulta resuelta por agente",
-            occurred_at=datetime(2026, 6, 25, 17, 5, tzinfo=timezone.utc),
-            channel="CHAT",
-            status="RESOLVED",
-        ),
-    ]
-
-
-def _build_mock_product_detail(
-    account_id: str,
-    product_code: str,
-) -> Optional[AccountProductDetailResponse]:
-    if product_code not in SUPPORTED_PRODUCT_CODES:
-        return None
-
-    summary = next(
-        product for product in _mock_products() if product.product_code == product_code
-    )
-    details_by_product: Dict[str, Dict[str, Any]] = {
-        "remittance": {
-            "destinations": ["CL", "PE", "CO"],
-            "completed_transfers": 18,
-            "average_ticket_usd": 4580.57,
-        },
-        "p2p": {
-            "frequent_recipients": 4,
-            "completed_transfers": 9,
-            "average_ticket_usd": 1386.67,
-        },
-        "exchange": {
-            "preferred_pair": "CLP/USD",
-            "completed_exchanges": 31,
-            "average_spread_bps": 42,
-        },
-        "card": {
-            "physical_card_status": "ACTIVE",
-            "virtual_card_status": "ACTIVE",
-            "monthly_limit_usd": 5000,
-        },
-        "payments": {
-            "saved_services": 6,
-            "scheduled_payments": 2,
-            "successful_payments": 14,
-        },
-        "card_purchases": {
-            "approved_purchases": 76,
-            "declined_purchases": 2,
-            "international_share_percent": 34.5,
-        },
-    }
-    activity = [
-        item for item in _mock_activity() if item.product_code == product_code
-    ]
-
-    return AccountProductDetailResponse(
-        account_id=account_id,
-        product_code=product_code,
-        product_name=summary.product_name,
-        status=summary.status,
-        summary=summary.summary,
-        details=details_by_product[product_code],
-        recent_activity=activity,
-        data_source="mock",
-    )
