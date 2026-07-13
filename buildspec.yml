@@ -1,0 +1,33 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: us-east-1
+    AWS_ACCOUNT_ID: "766452279030"
+    FRONTEND_REPO: 766452279030.dkr.ecr.us-east-1.amazonaws.com/global66-crm-b2c-dev-frontend
+    BACKEND_REPO: 766452279030.dkr.ecr.us-east-1.amazonaws.com/global66-crm-b2c-dev-backend
+    CI_ALB_DNS: global66-crm-b2c-ci-alb-539569182.us-east-1.elb.amazonaws.com
+    ECS_CLUSTER: global66-crm-b2c-ci-cluster
+    ECS_FRONTEND_SERVICE: global66-crm-b2c-ci-frontend
+    ECS_BACKEND_SERVICE: global66-crm-b2c-ci-backend
+    IMAGE_TAG: ci
+
+phases:
+  install:
+    commands:
+      - npm ci
+  pre_build:
+    commands:
+      - test -n "$NEXT_PUBLIC_SUPABASE_URL" || { echo "NEXT_PUBLIC_SUPABASE_URL is required"; exit 1; }
+      - test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" || { echo "NEXT_PUBLIC_SUPABASE_ANON_KEY is required"; exit 1; }
+      - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+  build:
+    commands:
+      - docker build --build-arg NEXT_PUBLIC_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" --build-arg NEXT_PUBLIC_FASTAPI_BASE_URL="http://$CI_ALB_DNS" -t "$FRONTEND_REPO:$IMAGE_TAG" .
+      - docker build -f backend/Dockerfile -t "$BACKEND_REPO:$IMAGE_TAG" .
+  post_build:
+    commands:
+      - docker push "$FRONTEND_REPO:$IMAGE_TAG"
+      - docker push "$BACKEND_REPO:$IMAGE_TAG"
+      - aws ecs update-service --cluster global66-crm-b2c-ci-cluster --service global66-crm-b2c-ci-frontend --force-new-deployment
+      - aws ecs update-service --cluster global66-crm-b2c-ci-cluster --service global66-crm-b2c-ci-backend --force-new-deployment
