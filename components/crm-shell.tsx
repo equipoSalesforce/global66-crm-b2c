@@ -57,9 +57,10 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const agentRole = user?.role ?? "AGENT";
   const isCaseExpediente =
     pathname.startsWith("/casos/") && pathname !== "/casos/nuevo";
+  const isCasesList = pathname === "/casos";
   const hasGlobalSidebar = true;
   const isDashboard = pathname === "/dashboard";
-  const isCasesConsole = pathname === "/casos" || isCaseExpediente;
+  const isCasesConsole = isCaseExpediente;
   const isAccount360 = pathname.startsWith("/cuentas/");
   const isSidebarCompact = sidebarCollapsed || isAccount360;
   const visibleNavigationItems = getNavigationItems(agentRole, rolePermissions);
@@ -390,6 +391,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
             className={
               isCasesConsole
                 ? "h-[calc(100vh-40px)] min-h-0 w-full overflow-hidden bg-white"
+                : isCasesList
+                  ? "min-h-[calc(100vh-40px)] w-full bg-[#F4F6FA]"
                 : isDashboard
                   ? "min-h-[calc(100vh-40px)] w-full overflow-hidden bg-[var(--g66-background)]"
                 : isAccount360

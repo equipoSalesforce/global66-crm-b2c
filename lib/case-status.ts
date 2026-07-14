@@ -4,6 +4,7 @@ export const lifecycleStatuses = [
   "STAND_BY",
   "RESOLVED",
   "CLOSED",
+  "MERGED",
 ] as const;
 
 export const routingStatuses = [
