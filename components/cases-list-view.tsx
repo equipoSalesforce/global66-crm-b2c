@@ -1,970 +1,1620 @@
 "use client";
 
 import {
-  formatCaseNumber,
-  normalizeLifecycleStatus,
-  normalizeRoutingStatus,
-} from "@/lib/case-status";
-import { computeCaseSla, type CaseNotificationStatus } from "@/lib/case-sla";
-import { supabaseBrowser } from "@/lib/supabase-browser";
-import {
   AlertTriangle,
+  BarChart3,
   Bookmark,
   CheckCircle2,
-  CircleUserRound,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
-  Columns3,
+  Edit3,
   Filter,
-  ListFilter,
-  Mail,
-  MessageCircle,
-  MoreVertical,
-  Paperclip,
+  Flag,
+  GitMerge,
+  Hourglass,
+  List,
+  PauseCircle,
   Plus,
   RefreshCw,
   Search,
-  UserRound,
+  Settings,
+  UserCog,
+  X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type {
-  ConsoleAgentRecord,
-  ConsoleCaseRecord,
-  ConsoleMessageRecord,
-} from "./cases-console";
-
-type CaseListViewKey =
-  | "all"
-  | "mine"
-  | "open"
-  | "unassigned"
-  | "email"
-  | "whatsapp"
-  | "attachments"
-  | "pending_today"
-  | "sla_risk"
-  | "attention_queue"
-  | "new";
+import {
+  buildCaseViewModel,
+  type CaseViewColumnKey,
+  type CaseViewData,
+  type CaseViewMetricKey,
+  type CaseViewRow,
+} from "@/lib/case-view-service";
+import {
+  createCaseView,
+  emptyCaseViewFilters,
+  getCaseViews,
+  updateCaseView,
+  type CaseSavedView,
+  type CaseSavedViewFilters,
+} from "@/lib/case-views-storage-service";
+import { updateCasesBulk } from "@/lib/case-bulk-edit-service";
+import { mergeCases } from "@/lib/case-merge-service";
+import { changeCasesOwner } from "@/lib/case-owner-service";
+import { getAssignableUsers, type AssignableUser } from "@/lib/users-service";
+import { getCaseMetadata, type CaseMetadata } from "@/lib/case-metadata-service";
+import {
+  caseFieldDefinitions,
+  formatCaseStatusForView,
+  getEditableFieldByColumn,
+  normalizeCaseStatusForStorage,
+  type CaseEditableFieldKey,
+  type CaseFieldDefinition,
+} from "@/lib/case-field-definitions";
 
 type CasesListViewProps = {
-  cases: ConsoleCaseRecord[];
-  messages: ConsoleMessageRecord[];
-  agents: ConsoleAgentRecord[];
-  attachmentCounts: Record<string, number>;
+  data: CaseViewData | null;
 };
 
-const caseViews: { key: CaseListViewKey; label: string }[] = [
-  { key: "all", label: "Todos los casos" },
-  { key: "mine", label: "Mis casos" },
-  { key: "open", label: "Casos abiertos" },
-  { key: "unassigned", label: "Casos sin asignar" },
-  { key: "email", label: "Casos email" },
-  { key: "whatsapp", label: "Casos WhatsApp" },
-  { key: "attachments", label: "Casos con adjuntos" },
-  { key: "pending_today", label: "Pendientes hoy" },
-  { key: "sla_risk", label: "SLA en riesgo" },
-  { key: "attention_queue", label: "Cola de atención" },
-  { key: "new", label: "Nuevos recientes" },
-];
+type ModalMode = "create" | "edit" | "properties";
+type OperationModal = "merge" | "owner" | null;
+type CaseFieldChanges = Partial<
+  Record<CaseEditableFieldKey, string | boolean | null>
+>;
+type EditDrafts = Record<string, CaseFieldChanges>;
 
-function formatDateTime(date: string | null | undefined) {
-  if (!date) return "Sin fecha";
+type CaseViewDraft = {
+  name: string;
+  description: string;
+  privacy: CaseSavedView["privacy"];
+  editableByOthers: CaseSavedView["editableByOthers"];
+  visibleColumns: CaseViewColumnKey[];
+  filters: CaseSavedViewFilters;
+  sorting: CaseSavedView["sorting"];
+  useAsDefault: boolean;
+};
 
-  const parsedDate = new Date(date);
-  if (Number.isNaN(parsedDate.getTime())) return "Sin fecha";
+const sortingLabels: Record<CaseSavedView["sorting"], string> = {
+  updated_desc: "Actualización descendente",
+  updated_asc: "Actualización ascendente",
+  number_desc: "Número descendente",
+  number_asc: "Número ascendente",
+};
 
-  return new Intl.DateTimeFormat("es-CL", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsedDate);
+const metricIcons: Record<
+  CaseViewMetricKey,
+  { icon: ReactNode; className: string }
+> = {
+  total: {
+    icon: <BarChart3 className="h-3.5 w-3.5" />,
+    className: "bg-[#EAF1FF] text-[#205EEF]",
+  },
+  pending: {
+    icon: <Clock3 className="h-3.5 w-3.5" />,
+    className: "bg-[#FFF6DD] text-[#B77900]",
+  },
+  waiting: {
+    icon: <Hourglass className="h-3.5 w-3.5" />,
+    className: "bg-[#F4E8FF] text-[#8A3FFC]",
+  },
+  risk: {
+    icon: <AlertTriangle className="h-3.5 w-3.5" />,
+    className: "bg-[#FDECEC] text-[#DC2626]",
+  },
+  edge: {
+    icon: <Flag className="h-3.5 w-3.5" />,
+    className: "bg-[#FFF1E5] text-[#F97316]",
+  },
+  standBy: {
+    icon: <PauseCircle className="h-3.5 w-3.5" />,
+    className: "bg-[#EEF1F6] text-[#64748B]",
+  },
+  resolved: {
+    icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    className: "bg-[#D9F6E8] text-[#0E9F6E]",
+  },
+};
+
+function buildDraft({
+  columns,
+  currentFilters,
+  visibleColumns,
+  sorting,
+  view,
+}: {
+  columns: CaseViewData["columns"];
+  currentFilters: CaseSavedViewFilters;
+  visibleColumns: CaseViewColumnKey[];
+  sorting: CaseSavedView["sorting"];
+  view?: CaseSavedView | null;
+}): CaseViewDraft {
+  return {
+    name: view?.name ?? "Nueva vista de casos",
+    description: view?.description ?? "",
+    privacy: view?.privacy ?? "Privada",
+    editableByOthers: view?.editableByOthers ?? "No",
+    visibleColumns:
+      view?.visibleColumns.length ? view.visibleColumns : visibleColumns.length ? visibleColumns : columns.map((column) => column.key),
+    filters: view?.filters ?? currentFilters,
+    sorting: view?.sorting ?? sorting,
+    useAsDefault: view?.useAsDefault ?? false,
+  };
 }
 
-function getCustomerLabel(caseItem: ConsoleCaseRecord) {
+function responseBadgeClass(status: CaseViewRow["sla"]["response_status"]) {
+  if (status === "RED") return "bg-[#FDECEC] text-[#DC2626]";
+  if (status === "YELLOW") return "bg-[#FEF6E0] text-[#B45309]";
+
+  return "bg-[#D9F6E8] text-[#0E9F6E]";
+}
+
+function metricLabel(metric: CaseViewMetricKey) {
+  const labels: Record<CaseViewMetricKey, string> = {
+    total: "",
+    pending: "· Pendientes",
+    waiting: "· Esperando respuesta",
+    risk: "· En riesgo",
+    edge: "· Casos borde",
+    standBy: "· En stand by",
+    resolved: "· Resueltos",
+  };
+
+  return labels[metric];
+}
+
+function getCellValue(row: CaseViewRow, column: CaseViewColumnKey) {
+  const values: Record<CaseViewColumnKey, string> = {
+    number: row.number,
+    email: row.email,
+    contactType: row.contactType,
+    response: row.sla.response_label,
+    catPrincipal: row.catPrincipal,
+    catSecondary: row.catSecondary,
+    catExtra: row.catExtra,
+    status: row.statusLabel,
+    containmentContext: row.containmentContext,
+    owner: row.ownerName,
+    priority: row.priority,
+    isEdgeCase: row.isEdgeCase ? "Sí" : "No",
+    channel: row.channel,
+    product: row.product,
+    subproduct: row.subproduct,
+  };
+
+  return values[column];
+}
+
+function getRowEditableValue(row: CaseViewRow, field: CaseEditableFieldKey) {
+  if (field === "ownerId") return row.ownerId ?? "";
+
+  return row[field];
+}
+
+function getDraftValue(
+  row: CaseViewRow,
+  changes: CaseFieldChanges | undefined,
+  field: CaseEditableFieldKey,
+) {
+  const value = changes?.[field] ?? getRowEditableValue(row, field);
+
+  return typeof value === "boolean" ? value : String(value ?? "");
+}
+
+function uniqueOptions(rows: CaseViewRow[], getter: (row: CaseViewRow) => string) {
+  return Array.from(new Set(rows.map(getter).filter(Boolean))).sort();
+}
+
+function formatShowingCount(count: number, total: number) {
+  if (count === 0) return "Mostrando 0 casos";
+
+  return `Mostrando 1 a ${count.toLocaleString("es-CL")} de ${total.toLocaleString("es-CL")} casos`;
+}
+
+function ToolbarButton({
+  children,
+  variant = "secondary",
+  disabled = false,
+  onClick,
+}: {
+  children: ReactNode;
+  variant?: "primary" | "secondary";
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    caseItem.customer?.name ||
-    caseItem.contact_name ||
-    caseItem.customer?.email ||
-    caseItem.contact_email ||
-    caseItem.customer?.phone ||
-    caseItem.contact_phone ||
-    "Cliente no relacionado"
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={
+        variant === "primary"
+          ? "inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.22)] hover:bg-[#1548c7] disabled:cursor-not-allowed disabled:opacity-45"
+          : "inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#D6E0F5] bg-white px-3.5 text-xs font-bold text-[#205EEF] shadow-[0_1px_2px_rgba(15,23,42,.04)] hover:bg-[#F5F8FF] disabled:cursor-not-allowed disabled:opacity-45"
+      }
+    >
+      {children}
+    </button>
   );
 }
 
-function getAgentLabel(
-  caseItem: ConsoleCaseRecord,
-  agentNames: Map<string, string>,
-) {
-  if (caseItem.assigned_agent_id) {
-    return agentNames.get(caseItem.assigned_agent_id) || caseItem.assigned_to || "Sin agente";
+function ViewConfigModal({
+  columns,
+  draft,
+  mode,
+  options,
+  setDraft,
+  onClose,
+  onSave,
+}: {
+  columns: CaseViewData["columns"];
+  draft: CaseViewDraft;
+  mode: ModalMode;
+  options: FilterOptions;
+  setDraft: (draft: CaseViewDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const title =
+    mode === "create"
+      ? "Crear Vista"
+      : mode === "edit"
+        ? "Editar Vista"
+        : "Propiedades de la Vista";
+  const actionLabel = mode === "create" ? "Crear vista" : "Guardar cambios";
+
+  function toggleColumn(column: CaseViewColumnKey) {
+    const visibleColumns = draft.visibleColumns.includes(column)
+      ? draft.visibleColumns.filter((item) => item !== column)
+      : [...draft.visibleColumns, column];
+
+    setDraft({ ...draft, visibleColumns });
   }
 
-  return caseItem.assigned_to || "Sin agente";
-}
-
-function getLastActivity(
-  caseItem: ConsoleCaseRecord,
-  latestMessage: ConsoleMessageRecord | undefined,
-) {
-  return latestMessage?.created_at || caseItem.updated_at || caseItem.created_at;
-}
-
-function getMessagePreview(message: ConsoleMessageRecord | undefined) {
-  return (
-    message?.email_subject ||
-    message?.email_text_body ||
-    message?.body ||
-    ""
-  );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === "NEW") return "bg-[var(--g66-warning-soft)] text-[#B77900]";
-  if (status === "IN_PROGRESS") return "bg-[#E8F3FF] text-[var(--g66-brand-blue)]";
-  if (status === "CLOSED") return "bg-[var(--g66-success-soft)] text-[var(--g66-success)]";
-  if (status === "STAND_BY") return "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]";
-  if (status === "RESOLVED") return "bg-[var(--g66-success-soft)] text-[var(--g66-success)]";
-
-  return "bg-[var(--g66-background-soft)] text-[var(--g66-text-secondary)]";
-}
-
-function priorityBadgeClass(priority: string | null | undefined) {
-  const normalizedPriority = priority?.toUpperCase();
-
-  if (normalizedPriority === "HIGH" || normalizedPriority === "URGENT") {
-    return "bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]";
+  function updateFilter(key: keyof CaseSavedViewFilters, value: string) {
+    setDraft({ ...draft, filters: { ...draft.filters, [key]: value } });
   }
-
-  if (normalizedPriority === "MEDIUM") {
-    return "bg-[var(--g66-warning-soft)] text-[#B77900]";
-  }
-
-  if (normalizedPriority === "LOW") {
-    return "bg-[var(--g66-success-soft)] text-[var(--g66-success)]";
-  }
-
-  return "bg-[var(--g66-background-soft)] text-[var(--g66-text-secondary)]";
-}
-
-function priorityLabel(priority: string | null | undefined) {
-  const normalizedPriority = priority?.toUpperCase();
-
-  if (normalizedPriority === "HIGH") return "Alta";
-  if (normalizedPriority === "URGENT") return "Urgente";
-  if (normalizedPriority === "MEDIUM") return "Media";
-  if (normalizedPriority === "LOW") return "Baja";
-
-  return priority || "Sin prioridad";
-}
-
-function channelBadgeClass(channel: string | null | undefined) {
-  if (channel === "WHATSAPP") {
-    return "bg-[var(--g66-success-soft)] text-[var(--g66-success)]";
-  }
-
-  if (channel === "GMAIL" || channel === "EMAIL") {
-    return "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]";
-  }
-
-  return "bg-[var(--g66-background-soft)] text-[var(--g66-text-secondary)]";
-}
-
-function responseBadgeClass(status: CaseNotificationStatus) {
-  if (status === "RED") return "bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]";
-  if (status === "BLUE") return "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]";
-  if (status === "NEUTRAL") return "bg-[var(--g66-background)] text-[var(--g66-text-secondary)]";
-
-  return "bg-[var(--g66-success-soft)] text-[var(--g66-success)]";
-}
-
-function uniqueValues(
-  cases: ConsoleCaseRecord[],
-  key: keyof Pick<
-    ConsoleCaseRecord,
-    "priority" | "channel" | "lifecycle_status" | "status"
-  >,
-) {
-  return Array.from(
-    new Set(
-      cases
-        .map((caseItem) =>
-          key === "lifecycle_status"
-            ? normalizeLifecycleStatus(caseItem.lifecycle_status, caseItem.status)
-            : caseItem[key],
-        )
-        .filter((value): value is string => Boolean(value)),
-    ),
-  ).sort();
-}
-
-export function CasesListView({
-  cases,
-  messages,
-  agents,
-  attachmentCounts,
-}: CasesListViewProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [selectedView, setSelectedView] = useState<CaseListViewKey>(() => {
-    const viewParam = searchParams.get("view");
-    const statusParam = searchParams.get("status");
-
-    if (statusParam === "open") return "open";
-    if (viewParam === "my_cases") return "mine";
-    if (
-      viewParam === "pending_today" ||
-      viewParam === "sla_risk" ||
-      viewParam === "attention_queue" ||
-      viewParam === "new" ||
-      viewParam === "open" ||
-      viewParam === "all" ||
-      viewParam === "unassigned" ||
-      viewParam === "email" ||
-      viewParam === "whatsapp" ||
-      viewParam === "attachments"
-    ) {
-      return viewParam;
-    }
-
-    return "all";
-  });
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
-  const [channelFilter, setChannelFilter] = useState(() =>
-    searchParams.get("channel")?.toUpperCase() ?? "",
-  );
-  const [agentFilter, setAgentFilter] = useState("");
-  const [attachmentsOnly, setAttachmentsOnly] = useState(false);
-  const [agentSession] = useState(() => {
-    if (typeof window === "undefined") return { id: "" };
-
-    return { id: window.localStorage.getItem("agentId") ?? "" };
-  });
-
-  useEffect(() => {
-    function handleGlobalSearch(event: Event) {
-      const customEvent = event as CustomEvent<string>;
-      setQuery(customEvent.detail ?? "");
-    }
-
-    window.addEventListener("cases-global-search", handleGlobalSearch);
-
-    return () => {
-      window.removeEventListener("cases-global-search", handleGlobalSearch);
-    };
-  }, []);
-
-  useEffect(() => {
-    let refreshTimeout: number | null = null;
-
-    function refreshCases() {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
-
-      refreshTimeout = window.setTimeout(() => {
-        router.refresh();
-        refreshTimeout = null;
-      }, 250);
-    }
-
-    console.info("[realtime] subscribed", {
-      scope: "cases-list",
-      channel: "cases-list",
-    });
-
-    const casesChannel = supabaseBrowser
-      .channel("cases-list")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "cases",
-        },
-        (payload) => {
-          console.info("[realtime] cases list changed", {
-            eventType: payload.eventType,
-          });
-          refreshCases();
-        },
-      )
-      .subscribe((status) => {
-        console.info("[realtime] cases list subscription status", status);
-        if (status === "SUBSCRIBED") {
-          console.info("[realtime] status SUBSCRIBED", {
-            scope: "cases-list",
-            channel: "cases-list",
-          });
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("[realtime] cases list subscription error", {
-            status,
-            channel: "cases-list",
-          });
-        }
-      });
-    const fallbackIntervalId = window.setInterval(() => {
-      router.refresh();
-    }, 60000);
-
-    return () => {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
-      window.clearInterval(fallbackIntervalId);
-      void supabaseBrowser.removeChannel(casesChannel);
-      console.info("[realtime] unsubscribed", {
-        scope: "cases-list",
-      });
-    };
-  }, [router]);
-
-  const agentNames = useMemo(
-    () =>
-      new Map(
-        agents.map((agent) => [
-          agent.id,
-          agent.name ?? agent.email ?? agent.id,
-        ]),
-      ),
-    [agents],
-  );
-
-  const latestMessageByCase = useMemo(() => {
-    const latestMessages = new Map<string, ConsoleMessageRecord>();
-
-    messages.forEach((message) => {
-      if (!message.case_id) return;
-
-      const caseId = String(message.case_id);
-      const current = latestMessages.get(caseId);
-      const currentTime = current?.created_at
-        ? new Date(current.created_at).getTime()
-        : 0;
-      const messageTime = message.created_at
-        ? new Date(message.created_at).getTime()
-        : 0;
-
-      if (!current || messageTime >= currentTime) {
-        latestMessages.set(caseId, message);
-      }
-    });
-
-    return latestMessages;
-  }, [messages]);
-
-  const messagesByCase = useMemo(() => {
-    const groupedMessages = new Map<string, ConsoleMessageRecord[]>();
-
-    messages.forEach((message) => {
-      if (!message.case_id) return;
-
-      const caseId = String(message.case_id);
-      const currentMessages = groupedMessages.get(caseId) ?? [];
-      currentMessages.push(message);
-      groupedMessages.set(caseId, currentMessages);
-    });
-
-    return groupedMessages;
-  }, [messages]);
-
-  const filteredCases = cases
-    .filter((caseItem) => {
-      const lifecycleStatus = normalizeLifecycleStatus(
-        caseItem.lifecycle_status,
-        caseItem.status,
-      );
-      const routingStatus = normalizeRoutingStatus({
-        routingStatus: caseItem.routing_status,
-        status: caseItem.status,
-        assignedAgentId: caseItem.assigned_agent_id,
-      });
-      const attachmentCount = attachmentCounts[caseItem.id] ?? 0;
-      const caseMessages = messagesByCase.get(caseItem.id) ?? [];
-      const caseSla = computeCaseSla(caseItem, caseMessages);
-      const updatedAt = caseItem.updated_at
-        ? new Date(caseItem.updated_at).getTime()
-        : 0;
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      if (
-        selectedView === "mine" &&
-        (caseItem.assigned_agent_id !== agentSession.id ||
-          lifecycleStatus === "CLOSED")
-      ) {
-        return false;
-      }
-      if (selectedView === "open" && lifecycleStatus === "CLOSED") return false;
-      if (
-        selectedView === "pending_today" &&
-        (lifecycleStatus === "CLOSED" ||
-          updatedAt < todayStart.getTime() ||
-          (routingStatus !== "HUMAN_REQUIRED" && caseItem.assigned_agent_id))
-      ) {
-        return false;
-      }
-      if (
-        selectedView === "sla_risk" &&
-        caseSla.notificationStatus !== "RED" &&
-        caseSla.notificationStatus !== "BLUE"
-      ) {
-        return false;
-      }
-      if (
-        selectedView === "attention_queue" &&
-        (lifecycleStatus === "CLOSED" ||
-          (routingStatus !== "HUMAN_REQUIRED" &&
-            caseItem.assigned_agent_id &&
-            !["HIGH", "URGENT"].includes((caseItem.priority || "").toUpperCase())))
-      ) {
-        return false;
-      }
-      if (
-        selectedView === "new" &&
-        lifecycleStatus !== "NEW" &&
-        updatedAt < todayStart.getTime()
-      ) {
-        return false;
-      }
-      if (
-        selectedView === "unassigned" &&
-        routingStatus !== "UNASSIGNED" &&
-        caseItem.assigned_agent_id
-      ) {
-        return false;
-      }
-      if (selectedView === "email" && caseItem.channel !== "GMAIL") return false;
-      if (selectedView === "whatsapp" && caseItem.channel !== "WHATSAPP") {
-        return false;
-      }
-      if (selectedView === "attachments" && attachmentCount <= 0) return false;
-      if (attachmentsOnly && attachmentCount <= 0) return false;
-      if (statusFilter && lifecycleStatus !== statusFilter) return false;
-      if (priorityFilter && caseItem.priority !== priorityFilter) return false;
-      if (channelFilter && caseItem.channel !== channelFilter) return false;
-      if (agentFilter && caseItem.assigned_agent_id !== agentFilter) return false;
-
-      const latestMessage = latestMessageByCase.get(caseItem.id);
-      const searchableText = [
-        caseItem.case_number,
-        caseItem.subject,
-        getCustomerLabel(caseItem),
-        caseItem.customer?.email,
-        caseItem.customer?.phone,
-        caseItem.contact_email,
-        caseItem.contact_phone,
-        getAgentLabel(caseItem, agentNames),
-        caseItem.channel,
-        caseItem.contact_type,
-        getMessagePreview(latestMessage),
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return !query || searchableText.includes(query.toLowerCase());
-    })
-    .sort((caseA, caseB) => {
-      const activityA = getLastActivity(caseA, latestMessageByCase.get(caseA.id));
-      const activityB = getLastActivity(caseB, latestMessageByCase.get(caseB.id));
-
-      return (
-        new Date(activityB ?? 0).getTime() -
-        new Date(activityA ?? 0).getTime()
-      );
-    });
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-
-  const caseMetrics = cases.reduce(
-    (metrics, caseItem) => {
-      const lifecycleStatus = normalizeLifecycleStatus(
-        caseItem.lifecycle_status,
-        caseItem.status,
-      );
-      const routingStatus = normalizeRoutingStatus({
-        routingStatus: caseItem.routing_status,
-        status: caseItem.status,
-        assignedAgentId: caseItem.assigned_agent_id,
-      });
-      const caseMessages = messagesByCase.get(caseItem.id) ?? [];
-      const caseSla = computeCaseSla(caseItem, caseMessages);
-      const updatedAt = caseItem.updated_at
-        ? new Date(caseItem.updated_at).getTime()
-        : 0;
-
-      if (lifecycleStatus !== "CLOSED") metrics.open += 1;
-      if (
-        lifecycleStatus !== "CLOSED" &&
-        updatedAt >= todayStart.getTime() &&
-        (routingStatus === "HUMAN_REQUIRED" || !caseItem.assigned_agent_id)
-      ) {
-        metrics.pending += 1;
-      }
-      if (!caseItem.assigned_agent_id || routingStatus === "UNASSIGNED") {
-        metrics.unassigned += 1;
-      }
-      if (
-        caseSla.notificationStatus === "RED" ||
-        caseSla.notificationStatus === "BLUE"
-      ) {
-        metrics.risk += 1;
-      }
-      if (
-        (lifecycleStatus === "RESOLVED" || lifecycleStatus === "CLOSED") &&
-        updatedAt >= todayStart.getTime()
-      ) {
-        metrics.resolvedToday += 1;
-      }
-
-      return metrics;
-    },
-    { open: 0, pending: 0, unassigned: 0, risk: 0, resolvedToday: 0 },
-  );
-
-  const pillViews: Array<{
-    key: CaseListViewKey | "filter";
-    label: string;
-    icon: ReactNode;
-  }> = [
-    { key: "all", label: "Todos los casos", icon: <ListFilter /> },
-    { key: "mine", label: "Mis casos", icon: <UserRound /> },
-    { key: "open", label: "Abiertos", icon: <CheckCircle2 /> },
-    { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
-    { key: "email", label: "Email", icon: <Mail /> },
-    { key: "sla_risk", label: "En riesgo SLA", icon: <AlertTriangle /> },
-    { key: "unassigned", label: "Sin asignar", icon: <CircleUserRound /> },
-    { key: "filter", label: "Agregar filtro", icon: <Plus /> },
-  ];
-
-  const kpiCards = [
-    {
-      label: "Abiertos",
-      value: caseMetrics.open,
-      detail: "Casos en atención",
-      icon: <MessageCircle />,
-      iconClass: "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]",
-    },
-    {
-      label: "Pendientes",
-      value: caseMetrics.pending,
-      detail: "Requieren acción",
-      icon: <Clock3 />,
-      iconClass: "bg-[var(--g66-warning-soft)] text-[var(--g66-warning)]",
-    },
-    {
-      label: "Sin asignar",
-      value: caseMetrics.unassigned,
-      detail: "Disponibles para tomar",
-      icon: <CircleUserRound />,
-      iconClass: "bg-[var(--g66-background-soft)] text-[var(--g66-text-secondary)]",
-    },
-    {
-      label: "En riesgo",
-      value: caseMetrics.risk,
-      detail: "SLA o respuesta",
-      icon: <AlertTriangle />,
-      iconClass: "bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]",
-    },
-    {
-      label: "Resueltos hoy",
-      value: caseMetrics.resolvedToday,
-      detail: "Cerrados o resueltos",
-      icon: <CheckCircle2 />,
-      iconClass: "bg-[var(--g66-success-soft)] text-[var(--g66-success)]",
-    },
-  ];
 
   return (
-    <section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[linear-gradient(135deg,var(--g66-background)_0%,var(--g66-background-soft)_100%)] text-[var(--g66-text-primary)]">
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-5 lg:px-6">
-        <div className="mb-4 flex items-start justify-between gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
+      <section className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-[#E4E9F0] bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-[#EEF1F6] px-5 py-4">
           <div>
-            <h1 className="text-3xl font-black tracking-tight text-[var(--g66-text-primary)]">
-              Casos
-            </h1>
-            <p className="mt-1 text-sm font-medium text-[var(--g66-text-secondary)]">
-              Gestiona la atención y prioriza tu operación diaria.
+            <h2 className="text-lg font-black text-slate-950">{title}</h2>
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              Las vistas se guardan localmente hasta tener el backend definitivo.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] shadow-[var(--g66-shadow-card)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-[#E4E9F0] p-1.5 text-slate-500 hover:bg-slate-50"
+            aria-label={`Cerrar ${title}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="grid max-h-[68vh] gap-4 overflow-y-auto p-5 md:grid-cols-2">
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+            Nombre de la vista
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF] focus:ring-2 focus:ring-blue-100"
+              placeholder="Ej: Casos resueltos"
+            />
+          </label>
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+            Privacidad
+            <select
+              value={draft.privacy}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  privacy: event.target.value as CaseViewDraft["privacy"],
+                })
+              }
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
             >
-              <Bookmark className="h-4 w-4" aria-hidden="true" />
-              Guardar vista
-            </button>
-            <Link
-              href="/casos/nuevo"
-              className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-3 text-xs font-bold text-white shadow-[0_14px_28px_rgb(32_94_241/0.2)] transition hover:bg-[var(--g66-brand-blue-hover)]"
+              <option>Privada</option>
+              <option>Equipo</option>
+              <option>Pública</option>
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500 md:col-span-2">
+            Descripción opcional
+            <textarea
+              value={draft.description}
+              onChange={(event) =>
+                setDraft({ ...draft, description: event.target.value })
+              }
+              className="min-h-20 rounded-lg border border-[#DDE5F1] px-3 py-2 text-sm font-medium normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF] focus:ring-2 focus:ring-blue-100"
+              placeholder="Describe para qué sirve esta vista."
+            />
+          </label>
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+            Modificable por terceros
+            <select
+              value={draft.editableByOthers}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  editableByOthers:
+                    event.target.value as CaseViewDraft["editableByOthers"],
+                })
+              }
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
             >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Crear caso
-            </Link>
+              <option>Sí</option>
+              <option>No</option>
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+            Ordenamiento
+            <select
+              value={draft.sorting}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  sorting: event.target.value as CaseViewDraft["sorting"],
+                })
+              }
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
+            >
+              {Object.entries(sortingLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <fieldset className="grid gap-3 rounded-xl border border-[#E4E9F0] p-3 md:col-span-2">
+            <legend className="px-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+              Filtros de la vista
+            </legend>
+            <div className="grid gap-2 md:grid-cols-4">
+              <ModalFilter label="Canal" value={draft.filters.channel} options={options.channel} onChange={(value) => updateFilter("channel", value)} />
+              <ModalFilter label="Tipo de Contacto" value={draft.filters.contactType} options={options.contactType} onChange={(value) => updateFilter("contactType", value)} />
+              <ModalFilter label="Producto" value={draft.filters.product} options={options.product} onChange={(value) => updateFilter("product", value)} />
+              <ModalFilter label="Subproducto" value={draft.filters.subproduct} options={options.subproduct} onChange={(value) => updateFilter("subproduct", value)} />
+              <ModalFilter label="CAT Principal" value={draft.filters.catPrincipal} options={options.catPrincipal} onChange={(value) => updateFilter("catPrincipal", value)} />
+              <ModalFilter label="CAT Secundaria" value={draft.filters.catSecondary} options={options.catSecondary} onChange={(value) => updateFilter("catSecondary", value)} />
+              <ModalFilter label="CAT Extra" value={draft.filters.catExtra} options={options.catExtra} onChange={(value) => updateFilter("catExtra", value)} />
+              <ModalFilter label="Estado" value={draft.filters.status} options={options.status} onChange={(value) => updateFilter("status", value)} />
+            </div>
+          </fieldset>
+          <fieldset className="grid gap-2 rounded-xl border border-[#E4E9F0] p-3 md:col-span-2">
+            <legend className="px-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
+              Campos visibles
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+              {columns.map((column) => (
+                <label
+                  key={column.key}
+                  className="flex items-center gap-2 rounded-lg border border-[#EEF1F6] bg-[#FBFCFE] px-3 py-2 text-xs font-semibold text-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={draft.visibleColumns.includes(column.key)}
+                    onChange={() => toggleColumn(column.key)}
+                    className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
+                  />
+                  {column.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={draft.useAsDefault}
+              onChange={(event) =>
+                setDraft({ ...draft, useAsDefault: event.target.checked })
+              }
+              className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
+            />
+            Usar como vista por defecto
+          </label>
+        </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-[#EEF1F6] bg-[#FBFCFE] px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-4 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgba(32,94,239,.2)] hover:bg-[#1548c7]"
+          >
+            {actionLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function MergeCasesModal({
+  selectedCases,
+  metadata,
+  onClose,
+  onMerge,
+}: {
+  selectedCases: CaseViewRow[];
+  metadata: CaseMetadata;
+  onClose: () => void;
+  onMerge: (input: {
+    masterCaseId: string;
+    fieldResolution: CaseFieldChanges;
+  }) => void;
+}) {
+  const [masterCaseId, setMasterCaseId] = useState(selectedCases[0]?.id ?? "");
+  const fieldKeys: Array<{
+    key: CaseEditableFieldKey;
+    label: string;
+    getValue: (row: CaseViewRow) => string | boolean | null;
+  }> = [
+    { key: "contactType", label: "Tipo de contacto", getValue: (row) => row.contactType },
+    { key: "catPrincipal", label: "CAT Principal", getValue: (row) => row.catPrincipal },
+    { key: "catSecondary", label: "CAT Secundaria", getValue: (row) => row.catSecondary },
+    { key: "catExtra", label: "CAT Extra", getValue: (row) => row.catExtra },
+    { key: "status", label: "Estado", getValue: (row) => row.status },
+    { key: "containmentContext", label: "Contexto Contención", getValue: (row) => row.containmentContext },
+    { key: "ownerId", label: "Owner", getValue: (row) => row.ownerId ?? "" },
+    { key: "product", label: "Producto", getValue: (row) => row.product },
+    { key: "subproduct", label: "Subproducto", getValue: (row) => row.subproduct },
+    { key: "priority", label: "Prioridad", getValue: (row) => row.priority },
+  ];
+  const [fieldResolution, setFieldResolution] = useState<CaseFieldChanges>(() => {
+    const master = selectedCases[0];
+
+    if (!master) return {};
+
+    return fieldKeys.reduce<CaseFieldChanges>((values, field) => {
+      values[field.key] = field.getValue(master);
+      return values;
+    }, {});
+  });
+
+  function setResolvedValue(field: CaseEditableFieldKey, value: string | boolean) {
+    setFieldResolution((current) => ({ ...current, [field]: value }));
+  }
+
+  function confirmMerge() {
+    const shouldMerge = window.confirm(
+      "Esta acción fusionará los casos seleccionados y ocultará los casos secundarios de la vista normal. ¿Quieres continuar?",
+    );
+
+    if (!shouldMerge) return;
+
+    onMerge({ masterCaseId, fieldResolution });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
+      <section className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-[#E4E9F0] bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-[#EEF1F6] px-5 py-4">
+          <div>
+            <h2 className="text-lg font-black text-slate-950">Fusionar casos</h2>
+            <p className="mt-1 text-xs font-bold text-amber-700">
+              Esta acción combinará los casos seleccionados y dejará un caso principal.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-[#E4E9F0] p-1.5 text-slate-500 hover:bg-slate-50">
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="max-h-[70vh] overflow-y-auto p-5">
+          <div className="overflow-x-auto rounded-xl border border-[#E6EBF3]">
+            <table className="w-full min-w-[820px] text-left text-xs">
+              <thead className="bg-[#FBFCFE] text-[10px] uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Principal</th>
+                  <th className="px-3 py-2">Número</th>
+                  <th className="px-3 py-2">Correo</th>
+                  <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2">Owner</th>
+                  <th className="px-3 py-2">Tipo contacto</th>
+                  <th className="px-3 py-2">Categoría</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedCases.map((caseItem) => (
+                  <tr key={caseItem.id} className="border-t border-[#F1F4F8]">
+                    <td className="px-3 py-2">
+                      <input
+                        type="radio"
+                        checked={masterCaseId === caseItem.id}
+                        onChange={() => setMasterCaseId(caseItem.id)}
+                        className="accent-[#205EEF]"
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-black text-[#205EEF]">{caseItem.number.replace("Caso ", "")}</td>
+                    <td className="px-3 py-2">{caseItem.email}</td>
+                    <td className="px-3 py-2">{caseItem.statusLabel}</td>
+                    <td className="px-3 py-2">{caseItem.ownerName}</td>
+                    <td className="px-3 py-2">{caseItem.contactType}</td>
+                    <td className="px-3 py-2">{caseItem.catPrincipal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {fieldKeys.map((field) => (
+              <label key={field.key} className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                Conservar {metadata.fields[field.key]?.label ?? field.label}
+                <select
+                  value={String(fieldResolution[field.key] ?? "")}
+                  onChange={(event) => setResolvedValue(field.key, event.target.value)}
+                  className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+                >
+                  {selectedCases.map((caseItem) => {
+                    const value = field.getValue(caseItem);
+                    const label =
+                      field.key === "ownerId"
+                        ? caseItem.ownerName
+                        : String(value ?? "Sin valor");
+
+                    return (
+                      <option key={`${field.key}-${caseItem.id}`} value={String(value ?? "")}>
+                        {caseItem.number.replace("Caso ", "")} · {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            ))}
           </div>
         </div>
+        <footer className="flex justify-end gap-2 border-t border-[#EEF1F6] bg-[#FBFCFE] px-5 py-4">
+          <button type="button" onClick={onClose} className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-4 text-xs font-bold text-slate-600">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={confirmMerge}
+            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgba(32,94,239,.2)]"
+          >
+            Fusionar casos
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
 
-        <div className="mb-4 flex flex-wrap gap-2">
-          {pillViews.map((view) => {
-            const isActive = view.key !== "filter" && selectedView === view.key;
+function ChangeOwnerModal({
+  selectedCases,
+  users,
+  onClose,
+  onChangeOwner,
+}: {
+  selectedCases: CaseViewRow[];
+  users: AssignableUser[];
+  onClose: () => void;
+  onChangeOwner: (ownerId: string) => void;
+}) {
+  const [ownerId, setOwnerId] = useState(users[0]?.id ?? "");
+  const selectedOwnerId = ownerId || users[0]?.id || "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
+      <section className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#E4E9F0] bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-[#EEF1F6] px-5 py-4">
+          <div>
+            <h2 className="text-lg font-black text-slate-950">Cambiar owner</h2>
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              {selectedCases.length} caso(s) seleccionados
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-[#E4E9F0] p-1.5 text-slate-500 hover:bg-slate-50">
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="grid gap-4 p-5">
+          <div className="rounded-xl border border-[#E6EBF3] bg-[#FBFCFE] p-3 text-xs font-semibold text-slate-600">
+            {selectedCases.slice(0, 6).map((caseItem) => (
+              <span key={caseItem.id} className="mr-2 inline-flex rounded-full bg-white px-2 py-1 text-[#205EEF]">
+                {caseItem.number.replace("Caso ", "")}
+              </span>
+            ))}
+            {selectedCases.length > 6 ? <span>+{selectedCases.length - 6} más</span> : null}
+          </div>
+          <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+            Usuario asignable
+            <select
+              value={selectedOwnerId}
+              onChange={(event) => setOwnerId(event.target.value)}
+              className="h-10 rounded-lg border border-[#DDE5F1] bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+            >
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name} · {user.email} · {user.role}/{user.team}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[#EEF1F6] bg-[#FBFCFE] px-5 py-4">
+          <button type="button" onClick={onClose} className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-4 text-xs font-bold text-slate-600">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={!selectedOwnerId}
+            onClick={() => onChangeOwner(selectedOwnerId)}
+            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white disabled:opacity-45"
+          >
+            Cambiar owner
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+type FilterOptions = {
+  channel: string[];
+  contactType: string[];
+  product: string[];
+  subproduct: string[];
+  catPrincipal: string[];
+  catSecondary: string[];
+  catExtra: string[];
+  status: string[];
+};
+
+export function CasesListView({ data }: CasesListViewProps) {
+  const router = useRouter();
+  const rows = useMemo(() => data?.rows ?? [], [data?.rows]);
+  const columns = useMemo(() => data?.columns ?? [], [data?.columns]);
+  const [activeMetric, setActiveMetric] = useState<CaseViewMetricKey>("total");
+  const [search, setSearch] = useState("");
+  const [pageSize, setPageSize] = useState(100);
+  const [filters, setFilters] = useState<CaseSavedViewFilters>(emptyCaseViewFilters);
+  const [sorting, setSorting] = useState<CaseSavedView["sorting"]>("updated_desc");
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<CaseViewColumnKey[]>(
+    () => columns.map((column) => column.key),
+  );
+  const [savedViews, setSavedViews] = useState<CaseSavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [isViewListOpen, setIsViewListOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<ModalMode | null>(null);
+  const [operationModal, setOperationModal] = useState<OperationModal>(null);
+  const [saveStatus, setSaveStatus] = useState("");
+  const [operationStatus, setOperationStatus] = useState("");
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [isInlineEditing, setIsInlineEditing] = useState(false);
+  const [editDrafts, setEditDrafts] = useState<EditDrafts>({});
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [metadata, setMetadata] = useState<CaseMetadata>({
+    fields: caseFieldDefinitions,
+  });
+  const [draft, setDraft] = useState<CaseViewDraft>(() =>
+    buildDraft({
+      columns,
+      currentFilters: emptyCaseViewFilters,
+      visibleColumns: columns.map((column) => column.key),
+      sorting: "updated_desc",
+    }),
+  );
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void getCaseViews()
+        .then((views) => {
+          const defaultView = views.find((view) => view.useAsDefault) ?? null;
+
+          setSavedViews(views);
+          if (!defaultView) return;
+
+          setActiveViewId(defaultView.id);
+          setFilters(defaultView.filters);
+          setSorting(defaultView.sorting);
+          setVisibleColumnKeys(defaultView.visibleColumns);
+          setDraft(
+            buildDraft({
+              columns,
+              currentFilters: defaultView.filters,
+              visibleColumns: defaultView.visibleColumns,
+              sorting: defaultView.sorting,
+              view: defaultView,
+            }),
+          );
+        })
+        .catch((error) =>
+          showStatus(
+            error instanceof Error
+              ? error.message
+              : "No se pudieron cargar las vistas.",
+          ),
+        );
+      void getAssignableUsers().then(setAssignableUsers);
+      void getCaseMetadata().then(setMetadata);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [columns]);
+
+  const activeView = savedViews.find((view) => view.id === activeViewId) ?? null;
+  const currentViewName = activeView?.name ?? "Vista de Casos";
+  const activeMetricLabel = metricLabel(activeMetric);
+
+  const options: FilterOptions = useMemo(
+    () => ({
+      channel: uniqueOptions(rows, (row) => row.channel),
+      contactType: uniqueOptions(rows, (row) => row.contactType),
+      product: uniqueOptions(rows, (row) => row.product),
+      subproduct: uniqueOptions(rows, (row) => row.subproduct),
+      catPrincipal: uniqueOptions(rows, (row) => row.catPrincipal),
+      catSecondary: uniqueOptions(rows, (row) => row.catSecondary),
+      catExtra: uniqueOptions(rows, (row) => row.catExtra),
+      status: uniqueOptions(rows, (row) => row.statusLabel),
+    }),
+    [rows],
+  );
+
+  const viewModel = useMemo(
+    () =>
+      buildCaseViewModel({
+        allCases: rows,
+        activeFilters: filters,
+        searchTerm: search,
+        activeKpiFilter: activeMetric,
+        sorting,
+        pageSize,
+      }),
+    [activeMetric, filters, pageSize, rows, search, sorting],
+  );
+  const metrics = viewModel.metrics;
+  const visibleRows = viewModel.paginatedCases;
+  const visibleColumns = columns.filter((column) =>
+    visibleColumnKeys.includes(column.key),
+  );
+  const selectedRows = rows.filter((row) => selectedCaseIds.has(row.id));
+  const allVisibleSelected =
+    visibleRows.length > 0 && visibleRows.every((row) => selectedCaseIds.has(row.id));
+
+  function showStatus(message: string) {
+    setSaveStatus(message);
+    window.setTimeout(() => setSaveStatus(""), 2200);
+  }
+
+  function showOperationStatus(message: string) {
+    setOperationStatus(message);
+    window.setTimeout(() => setOperationStatus(""), 2600);
+  }
+
+  function refreshOperations() {
+    router.refresh();
+  }
+
+  function toggleCaseSelection(caseId: string) {
+    setSelectedCaseIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(caseId)) {
+        next.delete(caseId);
+      } else {
+        next.add(caseId);
+      }
+
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedCaseIds((current) => {
+      const next = new Set(current);
+
+      if (allVisibleSelected) {
+        visibleRows.forEach((row) => next.delete(row.id));
+      } else {
+        visibleRows.forEach((row) => next.add(row.id));
+      }
+
+      return next;
+    });
+  }
+
+  function updateEditDraft(
+    caseId: string,
+    field: CaseEditableFieldKey,
+    value: string | boolean,
+  ) {
+    setEditDrafts((current) => {
+      const nextValue =
+        field === "status"
+          ? {
+              status: normalizeCaseStatusForStorage(String(value)),
+            }
+          : { [field]: value };
+
+      return {
+        ...current,
+        [caseId]: {
+          ...(current[caseId] ?? {}),
+          ...nextValue,
+        },
+      };
+    });
+  }
+
+  async function saveInlineChanges() {
+    const updates = Object.entries(editDrafts).filter(
+      ([, changes]) => Object.keys(changes).length > 0,
+    );
+
+    if (updates.length === 0) {
+      setIsInlineEditing(false);
+      return;
+    }
+
+    setOperationStatus("Guardando cambios...");
+    try {
+      await updateCasesBulk(
+        updates.map(([caseId, fieldChanges]) => ({ caseId, fieldChanges })),
+      );
+      setEditDrafts({});
+      setIsInlineEditing(false);
+      refreshOperations();
+      showOperationStatus("Cambios guardados correctamente");
+    } catch (error) {
+      showOperationStatus(
+        error instanceof Error ? error.message : "Error al guardar cambios.",
+      );
+    }
+  }
+
+  function cancelInlineChanges() {
+    setEditDrafts({});
+    setIsInlineEditing(false);
+  }
+
+  async function executeMerge(input: {
+    masterCaseId: string;
+    fieldResolution: CaseFieldChanges;
+  }) {
+    setOperationStatus("Fusionando casos...");
+    try {
+      await mergeCases({
+        masterCaseId: input.masterCaseId,
+        mergedCaseIds: selectedRows.map((row) => row.id),
+        selectedCases: selectedRows,
+        fieldResolution: input.fieldResolution,
+        performedBy: "Usuario demo",
+      });
+      setSelectedCaseIds(new Set());
+      setOperationModal(null);
+      refreshOperations();
+      showOperationStatus("Casos fusionados correctamente");
+    } catch (error) {
+      showOperationStatus(
+        error instanceof Error ? error.message : "Error al fusionar casos.",
+      );
+    }
+  }
+
+  async function executeOwnerChange(ownerId: string) {
+    setOperationStatus("Cambiando owner...");
+    try {
+      await changeCasesOwner({
+        caseIds: selectedRows.map((row) => row.id),
+        newOwnerId: ownerId,
+      });
+      setSelectedCaseIds(new Set());
+      setOperationModal(null);
+      refreshOperations();
+      showOperationStatus("Owner actualizado correctamente");
+    } catch (error) {
+      showOperationStatus(
+        error instanceof Error ? error.message : "Error al cambiar owner.",
+      );
+    }
+  }
+
+  function getPicklistOptions(definition: CaseFieldDefinition) {
+    const dynamicOptions: string[] =
+      definition.key === "channel"
+        ? options.channel
+        : definition.key === "contactType"
+          ? options.contactType
+          : definition.key === "product"
+            ? options.product
+            : definition.key === "subproduct"
+              ? options.subproduct
+              : definition.key === "catPrincipal"
+                ? options.catPrincipal
+                : definition.key === "catSecondary"
+                  ? options.catSecondary
+                  : definition.key === "catExtra"
+                    ? options.catExtra
+                    : definition.key === "status"
+                      ? options.status
+                      : definition.key === "priority"
+                        ? uniqueOptions(rows, (row) => row.priority)
+                        : [];
+
+    return Array.from(
+      new Set([...(definition.options ?? []), ...dynamicOptions].filter(Boolean)),
+    );
+  }
+
+  function renderCaseCell(
+    row: CaseViewRow,
+    column: CaseViewData["columns"][number],
+  ) {
+    if (column.key === "number") {
+      return (
+        <Link
+          href={`/casos/${row.id}`}
+          className="font-black text-[#205EEF] hover:underline"
+        >
+          {row.number.replace("Caso ", "")}
+        </Link>
+      );
+    }
+
+    if (column.key === "response") {
+      return (
+        <span
+          className={`inline-flex rounded-md px-2.5 py-1 text-[10.5px] font-bold ${responseBadgeClass(row.sla.response_status)}`}
+        >
+          {row.sla.response_label}
+        </span>
+      );
+    }
+
+    const editableField = getEditableFieldByColumn(column.key);
+
+    if (!isInlineEditing || !editableField) {
+      return getCellValue(row, column.key);
+    }
+
+    const fieldDefinition = metadata.fields[editableField.key] ?? editableField;
+
+    if (fieldDefinition.type === "picklist") {
+      const currentValue = getDraftValue(row, editDrafts[row.id], editableField.key);
+      const selectValue =
+        editableField.key === "status"
+          ? formatCaseStatusForView(String(currentValue))
+          : String(currentValue);
+
+      return (
+        <select
+          value={selectValue}
+          onChange={(event) =>
+            updateEditDraft(row.id, editableField.key, event.target.value)
+          }
+          className="h-8 w-full min-w-[120px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+        >
+          {getPicklistOptions(fieldDefinition).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (fieldDefinition.type === "user") {
+      return (
+        <select
+          value={String(getDraftValue(row, editDrafts[row.id], editableField.key))}
+          onChange={(event) =>
+            updateEditDraft(row.id, editableField.key, event.target.value)
+          }
+          className="h-8 w-full min-w-[150px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+        >
+          <option value="">Sin owner</option>
+          {assignableUsers.map((user) => (
+            <option key={user.id} value={user.id}>
+              {user.name}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (fieldDefinition.type === "boolean") {
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(getDraftValue(row, editDrafts[row.id], editableField.key))}
+          onChange={(event) =>
+            updateEditDraft(row.id, editableField.key, event.target.checked)
+          }
+          aria-label={`Editar caso borde ${row.number}`}
+          className="h-4 w-4 rounded border-[#CBD5E1] text-[#205EEF]"
+        />
+      );
+    }
+
+    return (
+      <input
+        value={String(getDraftValue(row, editDrafts[row.id], editableField.key) ?? "")}
+        onChange={(event) =>
+          updateEditDraft(row.id, editableField.key, event.target.value)
+        }
+        className="h-8 w-full min-w-[120px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-semibold text-slate-700 outline-none"
+      />
+    );
+  }
+
+  function applyView(view: CaseSavedView, sourceViews = savedViews) {
+    setActiveViewId(view.id);
+    setFilters(view.filters);
+    setSorting(view.sorting);
+    setVisibleColumnKeys(view.visibleColumns);
+    setDraft(
+      buildDraft({
+        columns,
+        currentFilters: view.filters,
+        visibleColumns: view.visibleColumns,
+        sorting: view.sorting,
+        view,
+      }),
+    );
+    setSavedViews(sourceViews);
+    setIsViewListOpen(false);
+    setActiveMetric("total");
+  }
+
+  function resetView() {
+    setSearch("");
+    setActiveMetric("total");
+    setFilters(emptyCaseViewFilters);
+    setSorting("updated_desc");
+    setVisibleColumnKeys(columns.map((column) => column.key));
+    setActiveViewId(null);
+    setIsViewListOpen(false);
+    setSelectedCaseIds(new Set());
+    setEditDrafts({});
+    setIsInlineEditing(false);
+    router.refresh();
+  }
+
+  function openModal(mode: ModalMode) {
+    setDraft(
+      buildDraft({
+        columns,
+        currentFilters: filters,
+        visibleColumns: visibleColumnKeys,
+        sorting,
+        view: mode === "create" ? null : activeView,
+      }),
+    );
+    setModalMode(mode);
+  }
+
+  async function reloadCaseViews(preferredView?: CaseSavedView) {
+    const views = await getCaseViews();
+    const viewToApply =
+      preferredView && views.some((view) => view.id === preferredView.id)
+        ? views.find((view) => view.id === preferredView.id)
+        : views.find((view) => view.id === activeViewId) ??
+          views.find((view) => view.useAsDefault) ??
+          null;
+
+    setSavedViews(views);
+    if (viewToApply) applyView(viewToApply, views);
+
+    return views;
+  }
+
+  async function saveModalDraft() {
+    try {
+      if (modalMode === "create" || !activeViewId) {
+        const created = await createCaseView({
+          ...draft,
+          name: draft.name.trim() || "Vista sin nombre",
+        });
+
+        await reloadCaseViews(created);
+        setModalMode(null);
+        showStatus("Vista creada y guardada");
+        return;
+      }
+
+      if (activeView && !activeView.canEdit) {
+        showStatus("Esta vista es de solo lectura para tu usuario.");
+        return;
+      }
+
+      const updated = await updateCaseView(activeViewId, {
+        ...draft,
+        name: draft.name.trim() || "Vista sin nombre",
+      });
+
+      await reloadCaseViews(updated);
+      setModalMode(null);
+      showStatus("Vista actualizada");
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "No se pudo guardar la vista.",
+      );
+    }
+  }
+
+  async function saveCurrentView() {
+    try {
+      if (activeViewId) {
+        if (activeView && !activeView.canEdit) {
+          showStatus("Esta vista es de solo lectura para tu usuario.");
+          return;
+        }
+
+        const updated = await updateCaseView(activeViewId, {
+          filters,
+          sorting,
+          visibleColumns: visibleColumnKeys,
+        });
+
+        await reloadCaseViews(updated);
+        showStatus("Vista actual guardada");
+        return;
+      }
+
+      const created = await createCaseView({
+        name: "Vista de Casos personalizada",
+        description: "Vista creada desde Guardar Vista.",
+        privacy: "Privada",
+        editableByOthers: "No",
+        visibleColumns: visibleColumnKeys,
+        filters,
+        sorting,
+        useAsDefault: false,
+      });
+
+      await reloadCaseViews(created);
+      showStatus("Vista creada y guardada");
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "No se pudo guardar la vista.",
+      );
+    }
+  }
+
+  function updateFilter(key: keyof CaseSavedViewFilters, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  const isActiveViewReadOnly = Boolean(activeView && !activeView.canEdit);
+
+  return (
+    <section className="min-h-full bg-[#F4F6FA] px-6 py-6 text-slate-800">
+      <div className="mx-auto max-w-[1510px]">
+        <header className="mb-5 rounded-2xl border border-[#E6EBF3] bg-white px-6 py-5 shadow-[0_2px_8px_rgba(15,23,42,.04)]">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-[30px] font-black leading-tight tracking-[-.03em] text-[#08111F]">
+                {currentViewName}
+              </h1>
+              {activeMetricLabel ? (
+                <p className="mt-2 text-sm font-bold text-slate-500">
+                  {activeMetricLabel}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ToolbarButton onClick={() => openModal("create")}>
+                <Plus className="h-3.5 w-3.5" />
+                Crear Vista
+              </ToolbarButton>
+              <ToolbarButton
+                disabled={isActiveViewReadOnly}
+                onClick={() => openModal("edit")}
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                Editar Vista
+              </ToolbarButton>
+              <ToolbarButton disabled={isActiveViewReadOnly} onClick={saveCurrentView}>
+                <Bookmark className="h-3.5 w-3.5" />
+                Guardar Vista
+              </ToolbarButton>
+              <ToolbarButton
+                disabled={isActiveViewReadOnly}
+                onClick={() => openModal("properties")}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Propiedades
+              </ToolbarButton>
+              <Link
+                href="/casos/nuevo"
+                className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.24)] hover:bg-[#1548c7]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Crear Caso
+              </Link>
+            </div>
+          </div>
+        </header>
+
+        {isActiveViewReadOnly ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
+            Esta vista es pública o de equipo, pero tu usuario demo sólo puede
+            verla. No puede modificarla porque “Modificable por terceros” está en No.
+          </div>
+        ) : null}
+
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsViewListOpen((current) => !current)}
+              className="inline-flex h-10 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.22)] hover:bg-[#1548c7]"
+            >
+              <List className="h-3.5 w-3.5" />
+              Lista de Vistas
+            </button>
+            {isViewListOpen ? (
+              <div className="absolute left-0 top-12 z-30 w-72 overflow-hidden rounded-xl border border-[#E4E9F0] bg-white shadow-xl">
+                <button
+                  type="button"
+                  onClick={resetView}
+                  className="block w-full px-4 py-3 text-left text-xs font-bold text-slate-700 hover:bg-[#F5F8FF]"
+                >
+                  Vista de Casos estándar
+                </button>
+                {savedViews.map((view) => (
+                  <button
+                    key={view.id}
+                    type="button"
+                    onClick={() => applyView(view)}
+                    className={`block w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#F5F8FF] ${
+                      activeViewId === view.id
+                        ? "bg-[#F5F8FF] text-[#205EEF]"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {view.name}
+                    {view.useAsDefault ? (
+                      <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                        default
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+                {savedViews.length === 0 ? (
+                  <p className="px-4 py-3 text-xs font-semibold text-slate-400">
+                    Aún no hay vistas guardadas.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <ToolbarButton onClick={resetView}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            Actualizar
+          </ToolbarButton>
+          {saveStatus ? (
+            <span className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+              {saveStatus}
+            </span>
+          ) : null}
+          {operationStatus ? (
+            <span className="rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+              {operationStatus}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mb-5 grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+          {metrics.map((metric) => {
+            const isActive = activeMetric === metric.key;
+            const visual = metricIcons[metric.key];
 
             return (
               <button
-                key={view.key}
+                key={metric.key}
                 type="button"
-                onClick={() => {
-                  if (view.key !== "filter") setSelectedView(view.key);
-                }}
-                className={`inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border px-3 text-xs font-bold transition ${
+                onClick={() =>
+                  setActiveMetric((current) =>
+                    current === metric.key && metric.key !== "total"
+                      ? "total"
+                      : metric.key,
+                  )
+                }
+                className={`min-h-[74px] rounded-xl border bg-white px-4 py-3 text-left shadow-[0_4px_12px_rgba(15,23,42,.045)] transition hover:-translate-y-0.5 ${
                   isActive
-                    ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue)] text-white shadow-[0_12px_26px_rgb(32_94_241/0.18)]"
-                    : "border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] shadow-[var(--g66-shadow-card)] hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+                    ? "border-[#205EEF] bg-[#F5F8FF] shadow-[0_12px_26px_rgba(32,94,239,.13)]"
+                    : "border-[#E6EBF3] hover:border-[#D6E0F5]"
                 }`}
               >
-                <span className="[&_svg]:h-4 [&_svg]:w-4">{view.icon}</span>
-                {view.label}
+                <span className="flex items-start justify-between gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-[.09em] text-slate-500">
+                    {metric.label}
+                  </span>
+                  <span className={`grid h-6 w-6 place-items-center rounded-md ${visual.className}`}>
+                    {visual.icon}
+                  </span>
+                </span>
+                <span className="mt-2 block text-2xl font-black leading-none text-[#08111F]">
+                  {metric.value.toLocaleString("es-CL")}
+                </span>
               </button>
             );
           })}
         </div>
 
-        <div className="mb-4 grid gap-3 lg:grid-cols-5">
-          {kpiCards.map((card) => (
-            <article
-              key={card.label}
-              className="rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white p-4 shadow-[var(--g66-shadow-card)]"
-            >
-              <div className="flex items-center gap-3">
-                <span
-                  className={`flex h-9 w-10 shrink-0 items-center justify-center rounded-full ${card.iconClass} [&_svg]:h-5 [&_svg]:w-5`}
-                >
-                  {card.icon}
-                </span>
-                <div>
-                  <p className="text-xs font-semibold text-[var(--g66-text-secondary)]">
-                    {card.label}
-                  </p>
-                  <p className="mt-1 text-2xl font-black text-[var(--g66-text-primary)]">
-                    {card.value.toLocaleString("es-CL")}
-                  </p>
-                  <p className="mt-1 text-xs font-bold text-[var(--g66-success)]">
-                    {card.detail}
-                  </p>
-                </div>
-              </div>
-            </article>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <p className="mr-2 text-base font-black text-[#08111F]">
+            {viewModel.totalForPagination.toLocaleString("es-CL")} casos
+            {activeMetricLabel ? (
+              <span className="ml-2 text-xs font-semibold text-slate-400">
+                {activeMetricLabel}
+              </span>
+            ) : null}
+          </p>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-black text-[var(--g66-text-primary)]">
-              {filteredCases.length.toLocaleString("es-CL")} casos
-            </span>
-            <button
-              type="button"
-              onClick={() => router.refresh()}
-              className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex h-10 min-w-[260px] flex-1 items-center gap-2 rounded-[9px] border border-[#E4E9F0] bg-white px-3 text-xs text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,.03)] md:max-w-[300px]">
+            <Search className="h-3.5 w-3.5" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar casos"
+              className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {isInlineEditing ? (
+              <>
+                <ToolbarButton onClick={saveInlineChanges}>
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Guardar cambios
+                </ToolbarButton>
+                <ToolbarButton onClick={cancelInlineChanges}>
+                  Cancelar edición
+                </ToolbarButton>
+              </>
+            ) : (
+              <ToolbarButton onClick={() => setIsInlineEditing(true)}>
+                <Edit3 className="h-3.5 w-3.5" />
+                Modo edición
+              </ToolbarButton>
+            )}
+            <ToolbarButton
+              disabled={selectedCaseIds.size < 2}
+              onClick={() => setOperationModal("merge")}
             >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              Actualizar
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={selectedView}
-              onChange={(event) => setSelectedView(event.target.value as CaseListViewKey)}
-              className="h-9 w-48 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-text-primary)] outline-none transition focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
+              <GitMerge className="h-3.5 w-3.5" />
+              Fusionar
+            </ToolbarButton>
+            <ToolbarButton
+              disabled={selectedCaseIds.size === 0}
+              onClick={() => setOperationModal("owner")}
             >
-              {caseViews.map((view) => (
-                <option key={view.key} value={view.key}>
-                  {view.label}
-                </option>
-              ))}
-            </select>
-            <label className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--g66-text-muted)]" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar casos"
-                className="h-9 w-64 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white py-0 pl-9 pr-3 text-xs font-semibold text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)] transition focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
-              />
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-9 w-36 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-semibold outline-none focus:border-[var(--g66-brand-blue)]"
-            >
-              <option value="">Estado</option>
-              {uniqueValues(cases, "lifecycle_status").map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-            <select
-              value={priorityFilter}
-              onChange={(event) => setPriorityFilter(event.target.value)}
-              className="h-9 w-36 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-semibold outline-none focus:border-[var(--g66-brand-blue)]"
-            >
-              <option value="">Prioridad</option>
-              {uniqueValues(cases, "priority").map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-            <select
-              value={channelFilter}
-              onChange={(event) => setChannelFilter(event.target.value)}
-              className="h-9 w-32 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-semibold outline-none focus:border-[var(--g66-brand-blue)]"
-            >
-              <option value="">Canal</option>
-              {uniqueValues(cases, "channel").map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-            <select
-              value={agentFilter}
-              onChange={(event) => setAgentFilter(event.target.value)}
-              className="h-9 w-40 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-semibold outline-none focus:border-[var(--g66-brand-blue)]"
-            >
-              <option value="">Agente</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name || agent.email || agent.id}
-                </option>
-              ))}
-            </select>
-            <label className="flex h-9 shrink-0 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)]">
-              <input
-                type="checkbox"
-                checked={attachmentsOnly}
-                onChange={(event) => setAttachmentsOnly(event.target.checked)}
-                className="h-3.5 w-3.5 accent-[var(--g66-brand-blue)]"
-              />
-              Adjuntos
-            </label>
-            <button
-              type="button"
-              className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
-            >
-              <Columns3 className="h-4 w-4" aria-hidden="true" />
-              Columnas
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
-            >
-              <Filter className="h-4 w-4" aria-hidden="true" />
-              Más filtros
-            </button>
+              <UserCog className="h-3.5 w-3.5" />
+              Cambiar Owner
+            </ToolbarButton>
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
-          <div className="min-h-0 overflow-auto">
-            <table className="w-full min-w-[1420px] border-collapse text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-[var(--g66-surface-soft)] text-[11px] uppercase tracking-wide text-[var(--g66-text-secondary)]">
-                <tr className="border-b border-[var(--g66-border)]">
-                  <th className="w-10 px-3 py-3">
-                    <input type="checkbox" aria-label="Seleccionar todos" />
+        {selectedCaseIds.size > 0 || isInlineEditing ? (
+          <div className="mb-3 rounded-xl border border-[#D6E0F5] bg-[#F5F8FF] px-4 py-3 text-xs font-bold text-[#205EEF]">
+            {selectedCaseIds.size > 0 ? (
+              <span>
+                {selectedCaseIds.size.toLocaleString("es-CL")} caso
+                {selectedCaseIds.size === 1 ? "" : "s"} seleccionado
+                {selectedCaseIds.size === 1 ? "" : "s"}.
+              </span>
+            ) : null}
+            {isInlineEditing ? (
+              <span className={selectedCaseIds.size > 0 ? "ml-2" : ""}>
+                Tabla en modo edición inline.
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <FilterSelect label="Canal" value={filters.channel} onChange={(value) => updateFilter("channel", value)} options={options.channel} />
+          <FilterSelect label="Tipo de Contacto" value={filters.contactType} onChange={(value) => updateFilter("contactType", value)} options={options.contactType} />
+          <FilterSelect label="Producto" value={filters.product} onChange={(value) => updateFilter("product", value)} options={options.product} />
+          <FilterSelect label="Subproducto" value={filters.subproduct} onChange={(value) => updateFilter("subproduct", value)} options={options.subproduct} />
+          <FilterSelect label="CAT Principal" value={filters.catPrincipal} onChange={(value) => updateFilter("catPrincipal", value)} options={options.catPrincipal} />
+          <FilterSelect label="CAT Secundaria" value={filters.catSecondary} onChange={(value) => updateFilter("catSecondary", value)} options={options.catSecondary} />
+          <FilterSelect label="CAT Extra" value={filters.catExtra} onChange={(value) => updateFilter("catExtra", value)} options={options.catExtra} />
+          <FilterSelect label="Estado" value={filters.status} onChange={(value) => updateFilter("status", value)} options={options.status} />
+          <button
+            type="button"
+            onClick={() => openModal("properties")}
+            className="inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#D6E0F5] bg-[#F5F8FF] px-3.5 text-xs font-bold text-[#205EEF] shadow-[0_1px_2px_rgba(15,23,42,.03)]"
+          >
+            <Filter className="h-3.5 w-3.5" />
+            Más filtros
+          </button>
+        </div>
+
+        <section className="overflow-hidden rounded-xl border border-[#E6EBF3] bg-white shadow-[0_3px_10px_rgba(15,23,42,.04)]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1180px] border-separate border-spacing-0 text-left">
+              <thead>
+                <tr className="bg-[#FBFCFE]">
+                  <th className="w-12 border-b border-[#EEF1F6] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleVisibleSelection}
+                      aria-label="Seleccionar casos visibles"
+                      className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[#205EEF]"
+                    />
                   </th>
-                  <th className="px-3 py-3">Número</th>
-                  <th className="px-3 py-3">Cliente</th>
-                  <th className="px-3 py-3">Asunto</th>
-                  <th className="px-3 py-3">Estado</th>
-                  <th className="px-3 py-3">Respuesta</th>
-                  <th className="px-3 py-3">Prioridad</th>
-                  <th className="px-3 py-3">Asignado</th>
-                  <th className="px-3 py-3">Apertura</th>
-                  <th className="px-3 py-3">Última actividad</th>
-                  <th className="px-3 py-3">Canal</th>
-                  <th className="px-3 py-3">Tipo contacto</th>
-                  <th className="px-3 py-3">Producto</th>
-                  <th className="px-3 py-3">Adjuntos</th>
-                  <th className="px-3 py-3">Acciones</th>
+                  {visibleColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className="border-b border-[#EEF1F6] px-3 py-3 text-[10px] font-black uppercase tracking-[.06em] text-slate-400"
+                    >
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--g66-border-soft)]">
-            {filteredCases.map((caseItem) => {
-              const lifecycleStatus = normalizeLifecycleStatus(
-                caseItem.lifecycle_status,
-                caseItem.status,
-              );
-              const latestMessage = latestMessageByCase.get(caseItem.id);
-              const attachmentCount = attachmentCounts[caseItem.id] ?? 0;
-              const caseMessages = messages.filter(
-                (message) => String(message.case_id) === caseItem.id,
-              );
-              const sla = computeCaseSla(caseItem, caseMessages);
-
-              return (
-                <tr
-                  key={caseItem.id}
-                  className="transition hover:bg-[var(--g66-surface-soft)]"
-                >
-                  <td className="px-3 py-2.5">
-                    <input type="checkbox" aria-label={`Seleccionar ${caseItem.id}`} />
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 font-black text-[var(--g66-brand-blue)]">
-                    <Link href={`/casos/${caseItem.id}`} className="hover:underline">
-                      {formatCaseNumber(caseItem.case_number, caseItem.id).replace(
-                        /^Caso\s*/i,
-                        "",
-                      )}
-                    </Link>
-                  </td>
-                  <td className="max-w-52 px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--g66-success-soft)] text-[11px] font-black text-[var(--g66-success)]">
-                        {getCustomerLabel(caseItem)
-                          .split(" ")
-                          .map((part) => part[0])
-                          .join("")
-                          .slice(0, 2)
-                          .toUpperCase()}
-                      </span>
-                      <span className="truncate font-bold text-[var(--g66-text-primary)]">
-                        {getCustomerLabel(caseItem)}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="max-w-80 truncate px-3 py-2.5 font-semibold text-[var(--g66-text-primary)]">
-                    <Link
-                      href={`/casos/${caseItem.id}`}
-                      className="hover:text-[var(--g66-brand-blue)] hover:underline"
-                    >
-                      {caseItem.subject || "Caso sin asunto"}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${statusBadgeClass(lifecycleStatus)}`}
-                    >
-                      {lifecycleStatus}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${responseBadgeClass(sla.notificationStatus)}`}
-                    >
-                      {sla.notificationStatus === "RED"
-                        ? "Sin respuesta"
-                        : sla.notificationLabel}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${priorityBadgeClass(
-                        caseItem.priority,
-                      )}`}
-                    >
-                      {priorityLabel(caseItem.priority)}
-                    </span>
-                  </td>
-                  <td className="max-w-44 truncate px-3 py-2.5 font-semibold text-[var(--g66-text-secondary)]">
-                    {getAgentLabel(caseItem, agentNames)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-[var(--g66-text-secondary)]">
-                    {formatDateTime(caseItem.created_at)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-[var(--g66-text-secondary)]">
-                    {formatDateTime(getLastActivity(caseItem, latestMessage))}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${channelBadgeClass(
-                        caseItem.channel,
-                      )}`}
-                    >
-                      {caseItem.channel === "WHATSAPP" ? (
-                        <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                      ) : caseItem.channel === "GMAIL" || caseItem.channel === "EMAIL" ? (
-                        <Mail className="h-3.5 w-3.5" aria-hidden="true" />
-                      ) : null}
-                      {caseItem.channel || "Sin canal"}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-[var(--g66-text-secondary)]">
-                    {caseItem.contact_type || "Sin tipo"}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-[var(--g66-text-secondary)]">
-                    Global66 CRM
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
-                    {attachmentCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--g66-brand-blue-soft)] px-2.5 py-1 text-[11px] font-black text-[var(--g66-brand-blue)]">
-                        <Paperclip className="h-3 w-3" aria-hidden="true" />
-                        {attachmentCount}
-                      </span>
-                    ) : (
-                      <span className="text-[var(--g66-text-secondary)]">-</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/casos/${caseItem.id}`}
-                        className="inline-flex h-8 items-center justify-center rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white px-3 text-xs font-black text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.id} className="bg-white hover:bg-[#FBFCFE]">
+                    <td className="border-b border-[#F1F4F8] px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedCaseIds.has(row.id)}
+                        onChange={() => toggleCaseSelection(row.id)}
+                        aria-label={`Seleccionar ${row.number}`}
+                        className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[#205EEF]"
+                      />
+                    </td>
+                    {visibleColumns.map((column) => (
+                      <td
+                        key={`${row.id}-${column.key}`}
+                        className="max-w-[220px] truncate border-b border-[#F1F4F8] px-3 py-3 text-[11.5px] font-medium text-slate-600"
+                        title={getCellValue(row, column.key)}
                       >
-                        Abrir
-                      </Link>
-                      <button
-                        type="button"
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-[var(--g66-text-secondary)] hover:border-[var(--g66-border)] hover:bg-[var(--g66-surface-soft)] hover:text-[var(--g66-brand-blue)]"
-                        aria-label="Más acciones"
-                      >
-                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {filteredCases.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={15}
-                  className="px-3 py-10 text-center text-sm font-semibold text-[var(--g66-text-secondary)]"
-                >
-                  No hay casos para la vista o filtros actuales.
-                </td>
-              </tr>
-            ) : null}
+                        {renderCaseCell(row, column)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
+            {visibleRows.length === 0 ? (
+              <div className="grid place-items-center px-6 py-14 text-sm font-semibold text-slate-400">
+                No hay casos para los filtros seleccionados.
+              </div>
+            ) : null}
           </div>
-          <div className="flex items-center justify-between border-t border-[var(--g66-border-soft)] bg-white px-4 py-3 text-xs font-semibold text-[var(--g66-text-secondary)]">
-            <span>
-              Mostrando {filteredCases.length > 0 ? "1" : "0"} a{" "}
-              {filteredCases.length.toLocaleString("es-CL")} de{" "}
-              {filteredCases.length.toLocaleString("es-CL")} casos
-            </span>
-            <div className="flex items-center gap-2">
-              <button className="h-9 rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white px-3 text-[var(--g66-text-muted)]">
-                ‹
-              </button>
-              <button className="h-9 rounded-[var(--g66-radius-sm)] bg-[var(--g66-brand-blue-soft)] px-3 font-black text-[var(--g66-brand-blue)]">
-                1
-              </button>
-              <button className="h-9 rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white px-3 text-[var(--g66-text-muted)]">
-                ›
-              </button>
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#EEF1F6] bg-[#FBFCFE] px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[11px] font-medium text-slate-500">
+                {formatShowingCount(visibleRows.length, viewModel.totalForPagination)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {[100, 200, 300].map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setPageSize(size)}
+                    className={`h-6 rounded-md px-3 text-[11px] font-bold ${
+                      pageSize === size
+                        ? "bg-slate-300 text-slate-900"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
+            <div className="flex items-center gap-1.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E4E9F0] text-slate-400">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </span>
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#205EEF] text-[11px] font-bold text-white">
+                1
+              </span>
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E4E9F0] text-slate-400">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </span>
+            </div>
+          </footer>
+        </section>
       </div>
+
+      {modalMode ? (
+        <ViewConfigModal
+          columns={columns}
+          draft={draft}
+          mode={modalMode}
+          options={options}
+          setDraft={setDraft}
+          onClose={() => setModalMode(null)}
+          onSave={saveModalDraft}
+        />
+      ) : null}
+      {operationModal === "merge" ? (
+        <MergeCasesModal
+          selectedCases={selectedRows}
+          metadata={metadata}
+          onClose={() => setOperationModal(null)}
+          onMerge={executeMerge}
+        />
+      ) : null}
+      {operationModal === "owner" ? (
+        <ChangeOwnerModal
+          selectedCases={selectedRows}
+          users={assignableUsers}
+          onClose={() => setOperationModal(null)}
+          onChangeOwner={executeOwnerChange}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="relative inline-flex h-9 items-center rounded-[9px] border border-[#E4E9F0] bg-white text-[11.5px] font-semibold text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,.03)]">
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={label}
+        className="h-full appearance-none rounded-[9px] bg-transparent py-0 pl-3 pr-8 outline-none"
+      >
+        <option value="">{label}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-slate-400" />
+    </label>
+  );
+}
+
+function ModalFilter({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+      >
+        <option value="">Todos</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

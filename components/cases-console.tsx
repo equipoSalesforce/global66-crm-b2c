@@ -391,6 +391,7 @@ const lifecyclePathLabels: Record<LifecycleStatus, string> = {
   STAND_BY: "Stand By",
   RESOLVED: "Resolved",
   CLOSED: "Closed",
+  MERGED: "Merged",
 };
 const ticketTabs: { key: TicketTab; label: string }[] = [
   { key: "publish", label: "Correo" },
