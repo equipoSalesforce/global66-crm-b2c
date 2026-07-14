@@ -9,7 +9,12 @@ import {
 export function DemoLoginAgents({ users }: { users: CrmUser[] }) {
   const router = useRouter();
 
-  function selectUser(user: CrmUser) {
+  async function selectUser(user: CrmUser) {
+    await fetch("/api/demo-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
     persistDemoCrmSession(user);
     router.push("/dashboard");
   }

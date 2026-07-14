@@ -3,6 +3,7 @@ import type {
   CaseViewFilters,
   CaseViewSorting,
 } from "./case-view-service";
+import { fetchCaseApi } from "./case-api-client";
 
 export type CaseSavedViewFilters = CaseViewFilters;
 
@@ -16,11 +17,13 @@ export type CaseSavedView = {
   filters: CaseSavedViewFilters;
   sorting: CaseViewSorting;
   useAsDefault: boolean;
+  canEdit: boolean;
+  ownerUserId: string;
+  ownerName: string;
+  teamId: string | null;
   createdAt: string;
   updatedAt: string;
 };
-
-const STORAGE_KEY = "global66.caseViews";
 
 export const emptyCaseViewFilters: CaseSavedViewFilters = {
   channel: "",
@@ -33,81 +36,45 @@ export const emptyCaseViewFilters: CaseSavedViewFilters = {
   status: "",
 };
 
-function canUseStorage() {
-  return typeof window !== "undefined" && "localStorage" in window;
+export async function getCaseViews(): Promise<CaseSavedView[]> {
+  const payload = await fetchCaseApi<{ views: CaseSavedView[] }>("/api/case-views");
+
+  return payload.views;
 }
 
-function safeParseViews(value: string | null): CaseSavedView[] {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value);
-
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function getCaseViews(): CaseSavedView[] {
-  if (!canUseStorage()) return [];
-
-  return safeParseViews(window.localStorage.getItem(STORAGE_KEY));
-}
-
-export function saveCaseViews(views: CaseSavedView[]) {
-  if (!canUseStorage()) return;
-
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(views));
-}
-
-export function createCaseView(
-  input: Omit<CaseSavedView, "id" | "createdAt" | "updatedAt">,
+export async function createCaseView(
+  input: Omit<
+    CaseSavedView,
+    "id" | "createdAt" | "updatedAt" | "canEdit" | "ownerUserId" | "ownerName" | "teamId"
+  >,
 ) {
-  const now = new Date().toISOString();
-  const newView: CaseSavedView = {
-    ...input,
-    id: `case-view-${Date.now()}`,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const existingViews = getCaseViews().map((view) => ({
-    ...view,
-    useAsDefault: input.useAsDefault ? false : view.useAsDefault,
-  }));
-
-  saveCaseViews([...existingViews, newView]);
-
-  return newView;
-}
-
-export function updateCaseView(
-  id: string,
-  patch: Partial<Omit<CaseSavedView, "id" | "createdAt">>,
-) {
-  const views = getCaseViews();
-  let updatedView: CaseSavedView | null = null;
-  const updatedViews = views.map((view) => {
-    if (patch.useAsDefault && view.id !== id) {
-      return { ...view, useAsDefault: false };
-    }
-
-    if (view.id !== id) return view;
-
-    updatedView = {
-      ...view,
-      ...patch,
-      updatedAt: new Date().toISOString(),
-    };
-
-    return updatedView;
+  const payload = await fetchCaseApi<{ view: CaseSavedView }>("/api/case-views", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 
-  saveCaseViews(updatedViews);
-
-  return updatedView;
+  return payload.view;
 }
 
-export function getDefaultCaseView() {
-  return getCaseViews().find((view) => view.useAsDefault) ?? null;
+export async function updateCaseView(
+  id: string,
+  patch: Partial<
+    Omit<CaseSavedView, "id" | "createdAt" | "canEdit" | "ownerUserId" | "ownerName" | "teamId">
+  >,
+) {
+  const payload = await fetchCaseApi<{ view: CaseSavedView }>(
+    `/api/case-views/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  );
+
+  return payload.view;
+}
+
+export async function deleteCaseView(id: string) {
+  await fetchCaseApi<{ ok: true }>(`/api/case-views/${id}`, {
+    method: "DELETE",
+  });
 }

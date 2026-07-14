@@ -37,7 +37,6 @@ import {
   createCaseView,
   emptyCaseViewFilters,
   getCaseViews,
-  getDefaultCaseView,
   updateCaseView,
   type CaseSavedView,
   type CaseSavedViewFilters,
@@ -709,27 +708,36 @@ export function CasesListView({ data }: CasesListViewProps) {
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      const views = getCaseViews();
-      const defaultView = getDefaultCaseView();
+      void getCaseViews()
+        .then((views) => {
+          const defaultView = views.find((view) => view.useAsDefault) ?? null;
+
+          setSavedViews(views);
+          if (!defaultView) return;
+
+          setActiveViewId(defaultView.id);
+          setFilters(defaultView.filters);
+          setSorting(defaultView.sorting);
+          setVisibleColumnKeys(defaultView.visibleColumns);
+          setDraft(
+            buildDraft({
+              columns,
+              currentFilters: defaultView.filters,
+              visibleColumns: defaultView.visibleColumns,
+              sorting: defaultView.sorting,
+              view: defaultView,
+            }),
+          );
+        })
+        .catch((error) =>
+          showStatus(
+            error instanceof Error
+              ? error.message
+              : "No se pudieron cargar las vistas.",
+          ),
+        );
       void getAssignableUsers().then(setAssignableUsers);
       void getCaseMetadata().then(setMetadata);
-
-      setSavedViews(views);
-      if (!defaultView) return;
-
-      setActiveViewId(defaultView.id);
-      setFilters(defaultView.filters);
-      setSorting(defaultView.sorting);
-      setVisibleColumnKeys(defaultView.visibleColumns);
-      setDraft(
-        buildDraft({
-          columns,
-          currentFilters: defaultView.filters,
-          visibleColumns: defaultView.visibleColumns,
-          sorting: defaultView.sorting,
-          view: defaultView,
-        }),
-      );
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
@@ -1086,68 +1094,99 @@ export function CasesListView({ data }: CasesListViewProps) {
     setModalMode(mode);
   }
 
-  function saveModalDraft() {
-    if (modalMode === "create" || !activeViewId) {
-      const created = createCaseView({
+  async function reloadCaseViews(preferredView?: CaseSavedView) {
+    const views = await getCaseViews();
+    const viewToApply =
+      preferredView && views.some((view) => view.id === preferredView.id)
+        ? views.find((view) => view.id === preferredView.id)
+        : views.find((view) => view.id === activeViewId) ??
+          views.find((view) => view.useAsDefault) ??
+          null;
+
+    setSavedViews(views);
+    if (viewToApply) applyView(viewToApply, views);
+
+    return views;
+  }
+
+  async function saveModalDraft() {
+    try {
+      if (modalMode === "create" || !activeViewId) {
+        const created = await createCaseView({
+          ...draft,
+          name: draft.name.trim() || "Vista sin nombre",
+        });
+
+        await reloadCaseViews(created);
+        setModalMode(null);
+        showStatus("Vista creada y guardada");
+        return;
+      }
+
+      if (activeView && !activeView.canEdit) {
+        showStatus("Esta vista es de solo lectura para tu usuario.");
+        return;
+      }
+
+      const updated = await updateCaseView(activeViewId, {
         ...draft,
         name: draft.name.trim() || "Vista sin nombre",
       });
-      const views = getCaseViews();
 
-      setSavedViews(views);
-      applyView(created, views);
+      await reloadCaseViews(updated);
       setModalMode(null);
-      showStatus("Vista creada y guardada");
-      return;
+      showStatus("Vista actualizada");
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "No se pudo guardar la vista.",
+      );
     }
-
-    const updated = updateCaseView(activeViewId, {
-      ...draft,
-      name: draft.name.trim() || "Vista sin nombre",
-    });
-    const views = getCaseViews();
-
-    setSavedViews(views);
-    if (updated) applyView(updated, views);
-    setModalMode(null);
-    showStatus("Vista actualizada");
   }
 
-  function saveCurrentView() {
-    if (activeViewId) {
-      const updated = updateCaseView(activeViewId, {
+  async function saveCurrentView() {
+    try {
+      if (activeViewId) {
+        if (activeView && !activeView.canEdit) {
+          showStatus("Esta vista es de solo lectura para tu usuario.");
+          return;
+        }
+
+        const updated = await updateCaseView(activeViewId, {
+          filters,
+          sorting,
+          visibleColumns: visibleColumnKeys,
+        });
+
+        await reloadCaseViews(updated);
+        showStatus("Vista actual guardada");
+        return;
+      }
+
+      const created = await createCaseView({
+        name: "Vista de Casos personalizada",
+        description: "Vista creada desde Guardar Vista.",
+        privacy: "Privada",
+        editableByOthers: "No",
+        visibleColumns: visibleColumnKeys,
         filters,
         sorting,
-        visibleColumns: visibleColumnKeys,
+        useAsDefault: false,
       });
-      const views = getCaseViews();
 
-      setSavedViews(views);
-      if (updated) applyView(updated, views);
-      showStatus("Vista actual guardada");
-      return;
+      await reloadCaseViews(created);
+      showStatus("Vista creada y guardada");
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "No se pudo guardar la vista.",
+      );
     }
-
-    const created = createCaseView({
-      name: "Vista de Casos personalizada",
-      description: "Vista creada desde Guardar Vista.",
-      privacy: "Privada",
-      editableByOthers: "No",
-      visibleColumns: visibleColumnKeys,
-      filters,
-      sorting,
-      useAsDefault: false,
-    });
-    const views = getCaseViews();
-
-    setSavedViews(views);
-    applyView(created, views);
-    showStatus("Vista creada y guardada");
   }
 
   function updateFilter(key: keyof CaseSavedViewFilters, value: string) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
+
+  const isActiveViewReadOnly = Boolean(activeView && !activeView.canEdit);
 
   return (
     <section className="min-h-full bg-[#F4F6FA] px-6 py-6 text-slate-800">
@@ -1169,15 +1208,21 @@ export function CasesListView({ data }: CasesListViewProps) {
                 <Plus className="h-3.5 w-3.5" />
                 Crear Vista
               </ToolbarButton>
-              <ToolbarButton onClick={() => openModal("edit")}>
+              <ToolbarButton
+                disabled={isActiveViewReadOnly}
+                onClick={() => openModal("edit")}
+              >
                 <Edit3 className="h-3.5 w-3.5" />
                 Editar Vista
               </ToolbarButton>
-              <ToolbarButton onClick={saveCurrentView}>
+              <ToolbarButton disabled={isActiveViewReadOnly} onClick={saveCurrentView}>
                 <Bookmark className="h-3.5 w-3.5" />
                 Guardar Vista
               </ToolbarButton>
-              <ToolbarButton onClick={() => openModal("properties")}>
+              <ToolbarButton
+                disabled={isActiveViewReadOnly}
+                onClick={() => openModal("properties")}
+              >
                 <Settings className="h-3.5 w-3.5" />
                 Propiedades
               </ToolbarButton>
@@ -1191,6 +1236,13 @@ export function CasesListView({ data }: CasesListViewProps) {
             </div>
           </div>
         </header>
+
+        {isActiveViewReadOnly ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
+            Esta vista es pública o de equipo, pero tu usuario demo sólo puede
+            verla. No puede modificarla porque “Modificable por terceros” está en No.
+          </div>
+        ) : null}
 
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <div className="relative">
