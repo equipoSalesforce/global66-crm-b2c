@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 type Customer = {
   id: string | number | null;
+  public_id: string | null;
   name: string | null;
   email: string | null;
   phone: string | null;
@@ -15,7 +16,7 @@ type Customer = {
 export default async function ClientesPage() {
   const { data, error } = await supabase
     .from("customers")
-    .select("id, name, email, phone")
+    .select("id, public_id, name, email, phone")
     .order("name", { ascending: true })
     .returns<Customer[]>();
 
@@ -50,7 +51,7 @@ export default async function ClientesPage() {
               return (
                 <li key={customerKey}>
                   <Link
-                    href={`/clientes/${customer.id}`}
+                    href={customer.public_id ? `/cuentas/${customer.public_id}` : "/cuentas"}
                     className="grid gap-2 p-5 transition-colors hover:bg-gray-50 focus:bg-gray-50 focus:outline-none sm:grid-cols-3 sm:items-center"
                   >
                     <p className="font-semibold text-gray-950">

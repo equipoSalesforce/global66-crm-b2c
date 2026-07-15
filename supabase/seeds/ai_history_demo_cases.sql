@@ -44,8 +44,8 @@ values (
   '+56955550123'
 );
 
-insert into public.customers (id, name, email, phone, created_at)
-select id, name, email, phone, now() - interval '8 months'
+insert into public.customers (id, customer_id, name, email, phone, created_at)
+select id, 'DEMO-CUSTOMER-AI-HISTORY', name, email, phone, now() - interval '8 months'
 from seed_ai_history_customer;
 
 create temp table seed_ai_history_cases (

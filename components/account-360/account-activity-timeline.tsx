@@ -2,12 +2,22 @@
 
 import type { AccountActivityItem } from "@/lib/account-360-api";
 import { History } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { formatDate, formatMoney } from "./account-360-format";
 
 const filters = ["Todo", "Casos", "WhatsApp · IA", "Llamadas", "Emails", "Transacciones"] as const;
 
 function matches(item: AccountActivityItem, filter: (typeof filters)[number]) {
+  if (item.activity_category) {
+    if (filter === "Todo") return true;
+    if (filter === "Casos") return item.activity_category === "case";
+    if (filter === "WhatsApp · IA") return item.activity_category === "whatsapp_ai";
+    if (filter === "Llamadas") return item.activity_category === "call";
+    if (filter === "Emails") return item.activity_category === "email";
+    return item.activity_category === "transaction";
+  }
+
   const haystack = `${item.activity_type} ${item.channel} ${item.title}`.toUpperCase();
   if (filter === "Todo") return true;
   if (filter === "Casos") return /CASE|CASO|SUPPORT/.test(haystack);
@@ -15,6 +25,17 @@ function matches(item: AccountActivityItem, filter: (typeof filters)[number]) {
   if (filter === "Llamadas") return /CALL|PHONE|LLAMADA/.test(haystack);
   if (filter === "Emails") return /EMAIL|MAIL/.test(haystack);
   return /TRANSACTION|EXCHANGE|PAYMENT|CARD|P2P|REM/.test(haystack);
+}
+
+function emptyMessage(filter: (typeof filters)[number]) {
+  if (filter === "Casos") return "No hay casos asociados a esta cuenta.";
+  if (filter === "WhatsApp · IA") {
+    return "No hay mensajes WhatsApp o IA asociados a esta cuenta.";
+  }
+  if (filter === "Llamadas") return "No hay llamadas asociadas a esta cuenta.";
+  if (filter === "Emails") return "No hay emails asociados a esta cuenta.";
+  if (filter === "Transacciones") return "No hay transacciones asociadas a esta cuenta.";
+  return "No hay actividad asociada a esta cuenta.";
 }
 
 export function AccountActivityTimeline({ items }: { items: AccountActivityItem[] }) {
@@ -33,12 +54,24 @@ export function AccountActivityTimeline({ items }: { items: AccountActivityItem[
             <li key={item.activity_id} className="relative grid grid-cols-[14px_minmax(0,1fr)_auto] gap-2.5 pb-3 last:pb-0">
               {index < visibleItems.length - 1 ? <span className="absolute left-[7px] top-4 h-full w-px bg-[var(--g66-border)]" /> : null}
               <span className="relative mt-1 h-3.5 w-3.5 rounded-full border-[3px] border-cyan-100 bg-cyan-500" />
-              <div><div className="flex flex-wrap items-center gap-1.5"><p className="text-xs font-bold text-[var(--g66-text-primary)]">{item.title}</p><span className="rounded-full bg-cyan-50 px-1.5 py-0.5 text-[9px] font-bold text-cyan-700">{item.activity_type.replaceAll("_", " ")}</span></div><p className="mt-0.5 text-[10px] text-[var(--g66-text-muted)]">{item.description || "Sin descripción"}{item.amount !== null && item.amount !== undefined ? ` · ${formatMoney(item.amount, item.currency || "USD")}` : ""}</p></div>
+              <div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {item.href ? (
+                    <Link href={item.href} className="text-xs font-bold text-[var(--g66-brand-blue)] hover:underline">
+                      {item.title}
+                    </Link>
+                  ) : (
+                    <p className="text-xs font-bold text-[var(--g66-text-primary)]">{item.title}</p>
+                  )}
+                  <span className="rounded-full bg-cyan-50 px-1.5 py-0.5 text-[9px] font-bold text-cyan-700">{item.activity_type.replaceAll("_", " ")}</span>
+                </div>
+                <p className="mt-0.5 text-[10px] text-[var(--g66-text-muted)]">{item.description || "Sin descripción"}{item.amount !== null && item.amount !== undefined ? ` · ${formatMoney(item.amount, item.currency || "USD")}` : ""}</p>
+              </div>
               <time className="text-right text-[10px] font-semibold text-[var(--g66-text-muted)]">{formatDate(item.occurred_at, true)}</time>
             </li>
           ))}
         </ol>
-      ) : <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No hay actividad para este filtro.</p>}
+      ) : <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{emptyMessage(activeFilter)}</p>}
     </section>
   );
 }

@@ -92,6 +92,14 @@ export type AccountActivityItem = {
   amount?: number | null;
   currency?: string | null;
   product_code?: string | null;
+  activity_category?:
+    | "case"
+    | "whatsapp_ai"
+    | "call"
+    | "email"
+    | "transaction"
+    | "other";
+  href?: string;
 };
 
 export type Account360 = {
@@ -149,6 +157,12 @@ export type Account360 = {
     status: string;
     accepted_at?: string | null;
   }>;
+};
+
+export type Account360View = Account360 & {
+  publicId: string;
+  customerId: string;
+  displayCustomerId: string;
 };
 
 export type AccountProductDetail = {

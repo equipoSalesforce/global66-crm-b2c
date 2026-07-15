@@ -21,8 +21,8 @@ export default async function AccountsPage() {
         <div className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.7fr_0.8fr_auto] gap-3 border-b border-[var(--g66-border)] bg-slate-50 px-4 py-2 text-[9px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]"><span>Cuenta</span><span>Tipo</span><span>Segmento</span><span>Estado KYC</span><span /></div>
         {accounts.length > 0 ? (
           accounts.map((account) => (
-            <Link key={account.accountId} href={`/cuentas/${account.accountId}`} className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.7fr_0.8fr_auto] items-center gap-3 px-4 py-3 hover:bg-blue-50/40">
-              <div className="min-w-0"><p className="truncate text-sm font-extrabold text-[var(--g66-text-primary)]">{account.fullName}</p><p className="mt-0.5 truncate text-[10px] text-[var(--g66-text-muted)]">{account.accountId} · {account.email}</p></div>
+            <Link key={account.publicId} href={`/cuentas/${account.publicId}`} className="grid grid-cols-[minmax(0,1.4fr)_0.8fr_0.7fr_0.8fr_auto] items-center gap-3 px-4 py-3 hover:bg-blue-50/40">
+              <div className="min-w-0"><p className="truncate text-sm font-extrabold text-[var(--g66-text-primary)]">{account.fullName}</p><p className="mt-0.5 truncate text-[10px] text-[var(--g66-text-muted)]">{account.publicId} · {account.email}</p></div>
               <span className="text-xs font-semibold text-[var(--g66-text-secondary)]">{account.accountType}</span>
               <span className="text-xs font-semibold text-[var(--g66-text-secondary)]">{account.segment}</span>
               <span className="w-fit rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-bold text-emerald-700">{account.kycStatus}</span>

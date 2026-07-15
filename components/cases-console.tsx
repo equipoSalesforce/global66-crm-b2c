@@ -108,6 +108,7 @@ export type ConsoleCaseRecord = {
     name: string | null;
     email?: string | null;
     phone?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -2220,7 +2221,7 @@ export function CasesConsole({
       const { data, error } = await supabaseBrowser
         .from("cases")
         .select(
-          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone)",
+          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
         )
         .eq("id", selectedCaseId)
         .single<ConsoleCaseRecord>();
@@ -2899,7 +2900,7 @@ export function CasesConsole({
     const { data, error } = await supabaseBrowser
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone)",
+        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
       )
       .eq("id", caseId)
       .single<ConsoleCaseRecord>();
@@ -3923,9 +3924,9 @@ export function CasesConsole({
                 title="Información del cliente"
                 icon={<User className="h-3.5 w-3.5" aria-hidden="true" />}
                 action={
-                  selectedCase.customer_id ? (
+                  selectedCase.customer?.public_id ? (
                     <Link
-                      href={`/clientes/${selectedCase.customer_id}`}
+                      href={`/cuentas/${selectedCase.customer.public_id}`}
                       className="inline-flex items-center gap-1 rounded-full border border-[var(--g66-border)] bg-white px-2 py-1 text-[10px] font-black text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       Cliente 360
