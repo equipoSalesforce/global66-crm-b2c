@@ -34,7 +34,7 @@ export default async function CasoExpedientePage({
     supabase
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
       )
       .order("created_at", { ascending: false })
       .returns<CaseRecord[]>(),

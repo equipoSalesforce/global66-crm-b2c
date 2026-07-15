@@ -29,6 +29,7 @@ import {
   type CaseCustomValue,
   type CaseFieldDefinition,
   type CaseLayoutTabWithSections,
+  type ResolvedCaseAreaLayout,
 } from "@/lib/case-metadata";
 import { normalizeAircallPhone } from "@/lib/aircall";
 import {
@@ -104,6 +105,9 @@ export type ConsoleCaseRecord = {
   ai_sentiment?: string | null;
   ai_confidence?: number | null;
   ai_resolution?: string | null;
+  product?: string | null;
+  subproduct?: string | null;
+  is_edge_case?: boolean | null;
   customer: {
     name: string | null;
     email?: string | null;
@@ -203,9 +207,9 @@ type ViewKey =
   | "whatsapp"
   | "email"
   | `saved:${string}`;
-type WorkTab = "whatsapp" | "ticket" | "ai";
+type WorkTab = "whatsapp" | "ticket" | "ai" | "activity" | "history" | "form";
 type TicketTab = "publish" | "details" | "activity" | "history" | `layout:${string}`;
-type RelatedView = "ai" | "history" | "activity" | "sla" | "aircall" | null;
+type RelatedView = "cases" | "qa" | "email" | "ai" | "history" | "activity" | "sla" | "aircall" | null;
 type PendingAction =
   | "status"
   | "assign-me"
@@ -394,12 +398,6 @@ const lifecyclePathLabels: Record<LifecycleStatus, string> = {
   CLOSED: "Closed",
   MERGED: "Merged",
 };
-const ticketTabs: { key: TicketTab; label: string }[] = [
-  { key: "publish", label: "Correo" },
-  { key: "details", label: "Detalles" },
-  { key: "activity", label: "Actividad" },
-  { key: "history", label: "Historial" },
-];
 const priorityOptions = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 const areaOptions = [
   "GENERAL",
@@ -489,6 +487,15 @@ function formatRelativeTime(date: string | null | undefined) {
   return `hace ${days} d`;
 }
 
+function getDaysWithoutOperation(date: string | null | undefined) {
+  if (!date) return null;
+
+  const timestamp = new Date(date).getTime();
+  if (Number.isNaN(timestamp)) return null;
+
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000));
+}
+
 function formatAttachmentSize(sizeBytes: number | null | undefined) {
   if (!sizeBytes || sizeBytes <= 0) return "Sin tamaño";
   if (sizeBytes < 1024) return `${sizeBytes} B`;
@@ -523,7 +530,7 @@ function Badge({
 
   return (
     <span
-      className={`inline-flex w-fit rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tones[tone]}`}
+      className={`inline-flex w-fit rounded-full px-1.5 py-px text-[9px] font-bold ${tones[tone]}`}
     >
       {children}
     </span>
@@ -539,6 +546,27 @@ function Field({ label, value }: { label: string; value: string }) {
       <dd className="mt-0.5 break-words text-xs font-bold text-[var(--g66-text-primary)]">
         {value}
       </dd>
+    </div>
+  );
+}
+
+function HeaderMetadataItem({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 px-3 py-1 first:pl-2 ${className}`}>
+      <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[var(--g66-text-muted)]">
+        {label}
+      </p>
+      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] font-black text-[var(--g66-text-primary)]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -1044,10 +1072,10 @@ function ModuleBox({
 }) {
   return (
     <section className="overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
-      <div className="flex items-center justify-between gap-2 border-b border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-2.5 py-1.5">
         <h3 className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-[var(--g66-text-primary)]">
           {icon ? (
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]">
               {icon}
             </span>
           ) : null}
@@ -1055,7 +1083,7 @@ function ModuleBox({
         </h3>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-2.5">{children}</div>
     </section>
   );
 }
@@ -1070,7 +1098,7 @@ function QuickCopyRow({
   onCopy: () => void;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-3 py-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-2.5 py-1.5">
       <div className="min-w-0">
         <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]">
           {label}
@@ -1080,7 +1108,7 @@ function QuickCopyRow({
       <button
         type="button"
         onClick={onCopy}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
         aria-label={`Copiar ${label}`}
         title={`Copiar ${label}`}
       >
@@ -1736,7 +1764,8 @@ export function CasesConsole({
   const [selectedEmailMessage, setSelectedEmailMessage] =
     useState<ConsoleMessageRecord | null>(null);
   const [attachmentItems, setAttachmentItems] = useState<MessageAttachmentRecord[]>([]);
-  const [layoutTabs, setLayoutTabs] = useState<CaseLayoutTabWithSections[]>([]);
+  const [, setLayoutTabs] = useState<CaseLayoutTabWithSections[]>([]);
+  const [areaLayoutTab, setAreaLayoutTab] = useState<CaseLayoutTabWithSections | null>(null);
   const [customValues, setCustomValues] = useState<CaseCustomValue[]>([]);
   const [auditEvents, setAuditEvents] = useState<CaseAuditEvent[]>([]);
   const [aircallCalls, setAircallCalls] = useState<AircallCallRecord[]>([]);
@@ -2104,6 +2133,75 @@ export function CasesConsole({
   }, [selectedCaseId]);
 
   useEffect(() => {
+    const selectedArea = caseItems.find((caseItem) => caseItem.id === selectedCaseId)?.area;
+    if (!selectedArea) {
+      void Promise.resolve().then(() => setAreaLayoutTab(null));
+      return;
+    }
+    const area = selectedArea;
+
+    let isMounted = true;
+    async function loadAreaLayout() {
+      const response = await fetch(`/api/case-layouts/${encodeURIComponent(area)}`, {
+        cache: "no-store",
+      });
+      if (response.status === 404) {
+        if (isMounted) setAreaLayoutTab(null);
+        return;
+      }
+      const layout = (await response.json()) as ResolvedCaseAreaLayout & { error?: string };
+      if (!response.ok) throw new Error(layout.error || "No se pudo cargar el layout del área.");
+
+      const definitionsByKey = new Map(
+        layout.fieldDefinitions.map((definition) => [definition.field_key, definition]),
+      );
+      const fields = [...layout.fields]
+        .sort((left, right) => left.order - right.order)
+        .flatMap((configuredField) => {
+          const definition = definitionsByKey.get(configuredField.fieldKey);
+          if (!definition) return [];
+          return [{
+            id: `${layout.id}:${definition.id}`,
+            section_id: layout.id,
+            field_definition_id: definition.id,
+            sort_order: configuredField.order,
+            column_span: 1,
+            is_readonly: !configuredField.editable,
+            field_definition: {
+              ...definition,
+              label: configuredField.label || definition.label,
+              is_required: configuredField.required,
+            },
+          }];
+        });
+
+      if (isMounted) {
+        setAreaLayoutTab({
+          id: layout.id,
+          tab_key: `area:${layout.area}`,
+          label: layout.name,
+          sort_order: 0,
+          is_active: layout.is_active,
+          sections: [{
+            id: layout.id,
+            tab_id: layout.id,
+            label: layout.name,
+            sort_order: 0,
+            is_active: true,
+            fields,
+          }],
+        });
+      }
+    }
+
+    void loadAreaLayout().catch((error) => {
+      console.error("[cases-console] Error loading area layout", error);
+      if (isMounted) setAreaLayoutTab(null);
+    });
+    return () => { isMounted = false; };
+  }, [caseItems, selectedCaseId]);
+
+  useEffect(() => {
     if (!selectedCaseId) return;
 
     let isMounted = true;
@@ -2221,7 +2319,7 @@ export function CasesConsole({
       const { data, error } = await supabaseBrowser
         .from("cases")
         .select(
-          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
         )
         .eq("id", selectedCaseId)
         .single<ConsoleCaseRecord>();
@@ -2611,6 +2709,7 @@ export function CasesConsole({
   const selectedLastActivity = selectedCase
     ? getLastActivity(selectedCase, selectedLatestMessage)
     : null;
+  const selectedDaysWithoutOperation = getDaysWithoutOperation(selectedLastActivity);
   const selectedCaseSla = selectedCase
     ? computeCaseSla(selectedCase, selectedCaseMessages)
     : null;
@@ -2626,12 +2725,12 @@ export function CasesConsole({
     : "UNASSIGNED";
   const workAreaGridClass =
     isQueueOpen && isRightPanelOpen
-      ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-3 p-3 xl:grid-cols-[240px_290px_minmax(0,1fr)_320px]"
+      ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[230px_280px_minmax(0,1fr)_310px]"
       : isQueueOpen
-        ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-3 p-3 xl:grid-cols-[240px_290px_minmax(0,1fr)_32px]"
+        ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[230px_280px_minmax(0,1fr)_30px]"
         : isRightPanelOpen
-          ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-3 p-3 xl:grid-cols-[290px_minmax(0,1fr)_320px]"
-          : "grid min-h-0 flex-1 items-stretch overflow-hidden gap-3 p-3 xl:grid-cols-[290px_minmax(0,1fr)_32px]";
+          ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[280px_minmax(0,1fr)_310px]"
+          : "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[280px_minmax(0,1fr)_30px]";
   const selectedMacro =
     activeMacros.find((macro) => macro.id === selectedMacroId) ?? null;
 
@@ -2735,8 +2834,15 @@ export function CasesConsole({
             field !== null && canViewCaseInfoField(field.field_key),
         ),
     );
+    const readonlyFieldIds = new Set(
+      tab.sections.flatMap((section) =>
+        section.fields
+          .filter((layoutField) => layoutField.is_readonly)
+          .map((layoutField) => layoutField.field_definition_id),
+      ),
+    );
     const editableFields = fields.filter((field) =>
-      canEditCaseInfoField(field.field_key),
+      canEditCaseInfoField(field.field_key) && !readonlyFieldIds.has(field.id),
     );
     const nextErrors: Record<string, string> = {};
     const standardCaseUpdates: Partial<ConsoleCaseRecord> = {};
@@ -2900,7 +3006,7 @@ export function CasesConsole({
     const { data, error } = await supabaseBrowser
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
       )
       .eq("id", caseId)
       .single<ConsoleCaseRecord>();
@@ -3576,10 +3682,10 @@ export function CasesConsole({
   return (
     <section className="relative flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden bg-[linear-gradient(135deg,var(--g66-background)_0%,var(--g66-background-soft)_100%)] text-[var(--g66-text-primary)]">
       {selectedCase ? (
-        <header className="mx-3 mt-4 flex h-[108px] shrink-0 items-stretch justify-between gap-3 rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white/95 px-4 py-2 shadow-[var(--g66-shadow-card)] backdrop-blur">
+        <header className="mx-2 mt-2 flex h-auto min-h-[92px] shrink-0 flex-col items-stretch justify-between gap-2 rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white/95 px-3 py-1.5 shadow-[var(--g66-shadow-card)] backdrop-blur lg:h-[92px] lg:flex-row">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--g66-brand-blue)] text-[11px] font-black text-white shadow-[0_10px_24px_rgb(32_94_241/0.22)]">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--g66-brand-blue)] text-[10px] font-black text-white shadow-[0_6px_16px_rgb(32_94_241/0.2)]">
                 {getCustomerLabel(selectedCase)
                   .split(" ")
                   .map((part) => part[0])
@@ -3587,13 +3693,16 @@ export function CasesConsole({
                   .slice(0, 2)
                   .toUpperCase()}
               </div>
-              <div className="min-w-[170px]">
-                <h1 className="truncate text-[22px] font-black leading-6 tracking-tight text-[var(--g66-text-primary)]">
+              <div className="min-w-[150px]">
+                <h1 className="truncate text-lg font-black leading-5 tracking-tight text-[var(--g66-text-primary)]">
                   {formatCaseNumber(selectedCase.case_number, selectedCase.id).replace(
                     /^Caso\s*/i,
                     "",
                   )}
                 </h1>
+                <p className="truncate text-[10px] font-semibold text-[var(--g66-text-secondary)]">
+                  {getCustomerLabel(selectedCase)}
+                </p>
               </div>
               <Badge tone={statusTone(selectedRoutingStatus)}>
                 {routingStatusLabel(selectedRoutingStatus)}
@@ -3630,47 +3739,64 @@ export function CasesConsole({
                 </Badge>
               ) : null}
             </div>
-            <div className="mt-2 grid max-w-6xl grid-cols-2 gap-x-5 gap-y-1.5 divide-[var(--g66-border-soft)] rounded-[var(--g66-radius-lg)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-3 py-2 text-xs md:grid-cols-[1fr_0.8fr_0.7fr_1fr_0.9fr_1fr] md:divide-x">
-              <Field
-                label="Cliente"
-                value={getCustomerLabel(selectedCase)}
-              />
-              <Field
-                label="Canal"
-                value={selectedCase.channel || selectedCase.contact_type || "Sin canal"}
-              />
-              <Field
-                label="Prioridad"
-                value={selectedCase.priority || "Sin prioridad"}
-              />
-              <Field
-                label="Asignado a"
-                value={getAgentLabel(selectedCase, agentNames)}
-              />
-              <Field
-                label="SLA"
-                value={
-                  selectedCaseSla
-                    ? getFrtSlaState(
-                        selectedCaseSla.frtSeconds,
-                        Boolean(selectedCaseSla.firstAgentResponseAt),
-                      ) === "Breached"
-                      ? "En riesgo"
-                      : "En cumplimiento"
-                    : "Sin SLA"
-                }
-              />
-              <Field
-                label="Última actividad"
-                value={formatRelativeTime(selectedLastActivity)}
-              />
+            <div className="mt-1 grid max-w-4xl grid-cols-2 divide-x divide-[var(--g66-border-soft)] rounded-[var(--g66-radius-md)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] sm:grid-cols-3 lg:grid-cols-[1.25fr_0.8fr_1fr_0.85fr_0.7fr]">
+              <HeaderMetadataItem label="Case Owner">
+                <span className="truncate">{getAgentLabel(selectedCase, agentNames)}</span>
+                {canEditAnyCaseInfoField ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCaseInfoEditing(true)}
+                    className="shrink-0 rounded border border-[var(--g66-border)] bg-white px-1.5 py-0.5 text-[9px] font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                  >
+                    Cambiar
+                  </button>
+                ) : null}
+              </HeaderMetadataItem>
+              <HeaderMetadataItem label="Área">
+                <span className="truncate">{selectedCase.area || "Sin área"}</span>
+              </HeaderMetadataItem>
+              <HeaderMetadataItem label="Último producto">
+                <span className="truncate">
+                  {selectedCase.product || "Sin producto"}
+                  {selectedCase.subproduct ? ` · ${selectedCase.subproduct}` : ""}
+                </span>
+              </HeaderMetadataItem>
+              <HeaderMetadataItem label="Días sin operar">
+                <span
+                  className={
+                    selectedDaysWithoutOperation && selectedDaysWithoutOperation > 0
+                      ? "rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-700"
+                      : ""
+                  }
+                >
+                  {selectedDaysWithoutOperation === null
+                    ? "Sin actividad"
+                    : `${selectedDaysWithoutOperation} d`}
+                </span>
+              </HeaderMetadataItem>
+              <HeaderMetadataItem label="Prioridad">
+                <span
+                  className={`inline-flex items-center gap-1 ${
+                    selectedCase.priority?.toUpperCase() === "HIGH" ||
+                    selectedCase.priority?.toUpperCase() === "URGENT"
+                      ? "text-[var(--g66-danger)]"
+                      : ""
+                  }`}
+                >
+                  {selectedCase.priority?.toUpperCase() === "HIGH" ||
+                  selectedCase.priority?.toUpperCase() === "URGENT" ? (
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                  ) : null}
+                  {selectedCase.priority || "Sin prioridad"}
+                </span>
+              </HeaderMetadataItem>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-start gap-2">
+          <div className="flex shrink-0 flex-wrap items-start gap-1.5">
             <Link
               href="/casos"
-              className="inline-flex h-9 items-center justify-center rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
             >
               Volver a listado
             </Link>
@@ -3679,7 +3805,7 @@ export function CasesConsole({
                 type="button"
                 disabled={pendingAction !== null}
                 onClick={openMacroModal}
-                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
+                className="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
               >
                 <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
                 Ejecutar macro
@@ -3689,14 +3815,14 @@ export function CasesConsole({
               type="button"
               disabled={!canTakeCases || pendingAction !== null}
               onClick={assignToMe}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
+              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
             >
               {pendingAction === "assign-me" ? "Asignando..." : "Asignar"}
             </button>
             <button
               type="button"
               onClick={() => toast.info("ℹ Acción completada")}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
             >
               Duplicar
             </button>
@@ -3705,7 +3831,7 @@ export function CasesConsole({
                 type="button"
                 disabled={pendingAction !== null}
                 onClick={closeCase}
-                className="inline-flex h-9 items-center justify-center rounded-[var(--g66-radius-md)] border border-[var(--g66-danger-soft)] bg-[var(--g66-danger-soft)] px-3 text-xs font-bold text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]"
+                className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-danger-soft)] bg-[var(--g66-danger-soft)] px-2.5 text-[11px] font-bold text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]"
               >
                 {pendingAction === "close" ? "Cerrando..." : "Cerrar"}
               </button>
@@ -3878,7 +4004,7 @@ export function CasesConsole({
         ) : null}
 
         {selectedCase ? (
-          <aside className="h-full min-h-0 overflow-y-auto border-r border-[var(--g66-border)] bg-[var(--g66-background)] p-3">
+          <aside className="h-full min-h-0 overflow-y-auto border-r border-[var(--g66-border)] bg-[var(--g66-background)] p-2">
             {!isQueueOpen ? (
               <button
                 type="button"
@@ -3888,38 +4014,7 @@ export function CasesConsole({
                 &gt; Mostrar cola
               </button>
             ) : null}
-            <div className="grid gap-3">
-              <ModuleBox
-                title="Campos de copiado rápido"
-                icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-              >
-                <div className="grid gap-1.5">
-                  <QuickCopyRow
-                    label="Correo"
-                    value={getCustomerEmail(selectedCase)}
-                    onCopy={() =>
-                      copyQuickValue(getCustomerEmail(selectedCase), "Correo copiado")
-                    }
-                  />
-                  <QuickCopyRow
-                    label="Teléfono"
-                    value={getCustomerPhone(selectedCase)}
-                    onCopy={() =>
-                      copyQuickValue(getCustomerPhone(selectedCase), "Teléfono copiado")
-                    }
-                  />
-                  <QuickCopyRow
-                    label="ID interno"
-                    value={String(selectedCase.customer_id || selectedCase.id)}
-                    onCopy={() =>
-                      copyQuickValue(
-                        String(selectedCase.customer_id || selectedCase.id),
-                        "ID copiado",
-                      )
-                    }
-                  />
-                </div>
-              </ModuleBox>
+            <div className="grid gap-2">
               <ModuleBox
                 title="Información del cliente"
                 icon={<User className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -3939,15 +4034,11 @@ export function CasesConsole({
                   )
                 }
               >
-                <dl className="grid gap-2">
-                  <Field label="Nombre" value={getCustomerLabel(selectedCase)} />
-                  <Field label="Email" value={getCustomerEmail(selectedCase)} />
-                  <Field label="Teléfono" value={getCustomerPhone(selectedCase)} />
-                  <Field
-                    label="Cliente relacionado"
-                    value={selectedCase.customer_id ? "Sí" : "No relacionado"}
-                  />
-                </dl>
+                <div className="grid gap-1.5">
+                  <QuickCopyRow label="Nombre" value={getCustomerLabel(selectedCase)} onCopy={() => copyQuickValue(getCustomerLabel(selectedCase), "Nombre copiado")} />
+                  <QuickCopyRow label="Email" value={getCustomerEmail(selectedCase)} onCopy={() => copyQuickValue(getCustomerEmail(selectedCase), "Correo copiado")} />
+                  <QuickCopyRow label="Teléfono" value={getCustomerPhone(selectedCase)} onCopy={() => copyQuickValue(getCustomerPhone(selectedCase), "Teléfono copiado")} />
+                </div>
                 {canUseAircall ? (
                   <button
                     type="button"
@@ -3962,6 +4053,18 @@ export function CasesConsole({
               </ModuleBox>
               <ModuleBox
                 title="Información del caso"
+                icon={<FileText className="h-3.5 w-3.5" aria-hidden="true" />}
+              >
+                <div className="grid gap-1.5">
+                  <QuickCopyRow label="Número de caso" value={formatCaseNumber(selectedCase.case_number, selectedCase.id)} onCopy={() => copyQuickValue(formatCaseNumber(selectedCase.case_number, selectedCase.id), "Número de caso copiado")} />
+                  <QuickCopyRow label="Correo" value={selectedCase.contact_email || getCustomerEmail(selectedCase)} onCopy={() => copyQuickValue(selectedCase.contact_email || getCustomerEmail(selectedCase), "Correo copiado")} />
+                  <QuickCopyRow label="Asunto" value={selectedCase.subject || "Sin asunto"} onCopy={() => copyQuickValue(selectedCase.subject || "Sin asunto", "Asunto copiado")} />
+                  <QuickCopyRow label="WhatsApp" value={selectedCase.contact_phone || getCustomerPhone(selectedCase)} onCopy={() => copyQuickValue(selectedCase.contact_phone || getCustomerPhone(selectedCase), "WhatsApp copiado")} />
+                  <QuickCopyRow label="ID técnico del caso" value={selectedCase.id} onCopy={() => copyQuickValue(selectedCase.id, "ID técnico copiado")} />
+                </div>
+              </ModuleBox>
+              <ModuleBox
+                title="Propiedades Caso"
                 icon={<FileText className="h-3.5 w-3.5" aria-hidden="true" />}
                 action={
                   canEditAnyCaseInfoField ? (
@@ -4152,10 +4255,14 @@ export function CasesConsole({
                     ) : null}
                     {canViewCaseInfoField("category") ? (
                       <Field
-                        label="Categoría"
+                        label="CAT Secundaria"
                         value={selectedCase.category || "Sin categoría"}
                       />
                     ) : null}
+                    <Field label="CAT Principal" value={selectedCase.area || "Sin categoría"} />
+                    <Field label="CAT Extra" value={selectedCase.ai_category || "Sin categoría extra"} />
+                    <Field label="Producto" value={selectedCase.product || "Sin producto"} />
+                    <Field label="Subproducto" value={selectedCase.subproduct || "Sin subproducto"} />
                     {canViewCaseInfoField("priority") ? (
                       <Field
                         label="Prioridad"
@@ -4186,8 +4293,17 @@ export function CasesConsole({
                         value={getAgentLabel(selectedCase, agentNames)}
                       />
                     ) : null}
+                    <Field label="Caso Borde" value={selectedCase.is_edge_case ? "Sí" : "No"} />
                   </dl>
                 )}
+              </ModuleBox>
+              <ModuleBox
+                title="CSAT"
+                icon={<CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
+              >
+                <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-xs font-semibold text-[var(--g66-text-secondary)]">
+                  No hay resultados de CSAT asociados a este caso.
+                </p>
               </ModuleBox>
             </div>
           </aside>
@@ -4264,8 +4380,8 @@ export function CasesConsole({
                 </div>
               </section>
 
-              <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
-                <div className="flex h-12 shrink-0 items-end border-b border-[var(--g66-border-soft)] bg-white px-4">
+              <section className="mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
+                <div className="flex h-10 shrink-0 items-end border-b border-[var(--g66-border-soft)] bg-white px-3">
                   {[
                     {
                       key: "whatsapp",
@@ -4286,6 +4402,21 @@ export function CasesConsole({
                           },
                         ]
                       : []),
+                    {
+                      key: "activity",
+                      label: "Actividad",
+                      icon: <Activity className="h-4 w-4" aria-hidden="true" />,
+                    },
+                    {
+                      key: "history",
+                      label: "Historial",
+                      icon: <History className="h-4 w-4" aria-hidden="true" />,
+                    },
+                    {
+                      key: "form",
+                      label: "Form",
+                      icon: <FileText className="h-4 w-4" aria-hidden="true" />,
+                    },
                   ].map((tab) => {
                     const key = tab.key as WorkTab;
                     const isActive = workTab === key;
@@ -4295,7 +4426,7 @@ export function CasesConsole({
                         key={key}
                         type="button"
                         onClick={() => setWorkTab(key)}
-                        className={`flex h-10 items-center gap-2 border-b-2 px-4 text-sm font-black transition ${
+                        className={`flex h-8 items-center gap-1.5 border-b-2 px-3 text-xs font-black transition ${
                           isActive
                             ? key === "whatsapp"
                               ? "border-[var(--g66-success)] text-[var(--g66-success)]"
@@ -4313,8 +4444,8 @@ export function CasesConsole({
                 </div>
 
                 {workTab === "whatsapp" ? (
-                  <div className="flex min-h-0 flex-1 flex-col gap-2 bg-[var(--g66-surface-soft)] p-2.5">
-                    <div className="flex h-8 shrink-0 items-center justify-between rounded-full border border-[var(--g66-success-soft)] bg-white px-4">
+                  <div className="flex min-h-0 flex-1 flex-col gap-1.5 bg-[var(--g66-surface-soft)] p-2">
+                    <div className="flex h-7 shrink-0 items-center justify-between rounded-full border border-[var(--g66-success-soft)] bg-white px-3">
                       <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-[var(--g66-success)]">
                         <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
                         WhatsApp
@@ -4404,39 +4535,9 @@ export function CasesConsole({
                   />
                 ) : null}
 
-                {workTab === "ticket" ? (
+                {["ticket", "activity", "history", "form"].includes(workTab) ? (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <div className="flex h-9 shrink-0 items-end border-b border-[var(--g66-border)] bg-white px-2">
-                      {[
-                        ...ticketTabs,
-                        ...layoutTabs.map((tab) => ({
-                          key: `layout:${tab.id}` as TicketTab,
-                          label: tab.label,
-                        })),
-                      ].map((tab) => {
-                        const isActive = ticketTab === tab.key;
-
-                        return (
-                          <button
-                            key={tab.key}
-                            type="button"
-                            onClick={() => {
-                              setTicketTab(tab.key);
-                              setIsCustomLayoutDirty(false);
-                            }}
-                            className={`flex h-8 items-center border-b-2 px-3 text-xs font-bold ${
-                              isActive
-                                ? "border-[var(--g66-brand-blue)] text-[var(--g66-brand-blue)]"
-                                : "border-transparent text-[var(--g66-text-secondary)] hover:text-[var(--g66-text-primary)]"
-                            }`}
-                          >
-                            {tab.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {ticketTab === "publish" ? (
+                    {workTab === "ticket" ? (
                       <CaseEmailComposer
                         key={`${selectedCase.id}-publish`}
                         caseItem={selectedCase}
@@ -4612,42 +4713,9 @@ export function CasesConsole({
                       </form>
                     ) : null}
 
-                    {ticketTab === "activity" ? (
+                    {workTab === "activity" ? (
                       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3">
                         <div className="grid gap-2">
-                          {auditEvents.slice(0, 12).map((event) => (
-                            <AuditEventCard
-                              key={`activity-audit-${event.id}`}
-                              event={event}
-                              agentNames={agentNames}
-                            />
-                          ))}
-                          <article className="rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm">
-                            <p className="text-xs font-bold text-[var(--g66-text-primary)]">
-                              Caso creado
-                            </p>
-                            <p className="mt-1 text-xs font-semibold text-[var(--g66-text-secondary)]">
-                              {formatDateTime(selectedCase.created_at)}
-                            </p>
-                          </article>
-                          <article className="rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm">
-                            <p className="text-xs font-bold text-[var(--g66-text-primary)]">
-                              Estado actual del ticket
-                            </p>
-                            <p className="mt-1 text-xs font-semibold text-[var(--g66-text-secondary)]">
-                              {selectedLifecycleStatus} · {selectedRoutingStatus}
-                            </p>
-                          </article>
-                          {selectedCase.assigned_agent_id || selectedCase.assigned_to ? (
-                            <article className="rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm">
-                              <p className="text-xs font-bold text-[var(--g66-text-primary)]">
-                                Asignación activa
-                              </p>
-                              <p className="mt-1 text-xs font-semibold text-[var(--g66-text-secondary)]">
-                                {getAgentLabel(selectedCase, agentNames)}
-                              </p>
-                            </article>
-                          ) : null}
                           {canViewCallHistory
                             ? aircallCalls.map((call) => (
                                 <AircallCallCard
@@ -4720,11 +4788,18 @@ export function CasesConsole({
                               </article>
                             );
                           })}
+                          {selectedCaseMessages.length === 0 && aircallCalls.length === 0 ? (
+                            <div className="grid gap-2">
+                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay gestiones registradas.</p>
+                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay llamadas asociadas.</p>
+                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay correos asociados.</p>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
 
-                    {ticketTab === "history" ? (
+                    {workTab === "history" ? (
                       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3">
                         <div className="grid gap-2 rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm">
                           <Field label="Caso creado" value={formatDateTime(selectedCase.created_at)} />
@@ -4741,47 +4816,6 @@ export function CasesConsole({
                               ))}
                             </div>
                           ) : null}
-                          {selectedCaseMessages.filter(isEmailMessage).length > 0 ? (
-                            <div className="mt-2 grid gap-2">
-                              {selectedCaseMessages.filter(isEmailMessage).map((message) => (
-                                <article
-                                  key={`history-email-${message.id}`}
-                                  className="rounded-md border border-[var(--g66-border)] bg-[var(--g66-background)] p-2"
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <p className="truncate text-xs font-bold text-[var(--g66-text-primary)]">
-                                        {getEmailTitle(message)}
-                                      </p>
-                                      <p className="mt-0.5 truncate text-xs font-semibold text-[var(--g66-text-secondary)]">
-                                        {message.email_subject || "Sin asunto"}
-                                      </p>
-                                    </div>
-                                    <span className="shrink-0 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
-                                      {formatDateTime(message.created_at)}
-                                    </span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedEmailMessage(message)}
-                                    className="mt-2 inline-flex h-7 items-center justify-center rounded-md border border-[var(--g66-border)] bg-white px-2 text-xs font-semibold text-[var(--g66-brand-blue)] hover:bg-white"
-                                  >
-                                    Ver correo completo
-                                  </button>
-                                </article>
-                              ))}
-                            </div>
-                          ) : null}
-                          {canViewCallHistory && aircallCalls.length > 0 ? (
-                            <div className="mt-2 grid gap-2">
-                              {aircallCalls.map((call) => (
-                                <AircallCallCard
-                                  key={`history-aircall-${call.id}`}
-                                  call={call}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
                           {auditEvents.length === 0 ? (
                             <div className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
                               No hay historial detallado de cambios para este caso todavía.
@@ -4791,16 +4825,14 @@ export function CasesConsole({
                       </div>
                     ) : null}
 
-                    {ticketTab.startsWith("layout:") ? (
+                    {workTab === "form" ? (
                       (() => {
-                        const layoutTab = layoutTabs.find(
-                          (tab) => ticketTab === `layout:${tab.id}`,
-                        );
+                        const layoutTab = areaLayoutTab;
 
                         if (!layoutTab) {
                           return (
                             <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                              Layout no disponible.
+                              No hay layout configurado para esta área.
                             </div>
                           );
                         }
@@ -4873,7 +4905,10 @@ export function CasesConsole({
                                               <CustomFieldInput
                                                 field={field}
                                                 value={value}
-                                                disabled={!canEditCaseInfoField(field.field_key)}
+                                                disabled={
+                                                  Boolean(layoutField.is_readonly) ||
+                                                  !canEditCaseInfoField(field.field_key)
+                                                }
                                               />
                                             </FormField>
                                             {field.description ? (
@@ -4906,6 +4941,7 @@ export function CasesConsole({
 
                                       return (
                                         field &&
+                                        !layoutField.is_readonly &&
                                         canViewCaseInfoField(field.field_key) &&
                                         canEditCaseInfoField(field.field_key)
                                       );
@@ -4934,7 +4970,7 @@ export function CasesConsole({
           )}
         </main>
 
-        <aside className="h-full min-h-0 overflow-y-auto border-l border-[var(--g66-border)] bg-[var(--g66-background)] p-3">
+        <aside className="h-full min-h-0 overflow-y-auto border-l border-[var(--g66-border)] bg-[var(--g66-background)] p-2">
           <div className="mb-3 flex h-8 items-center justify-between">
             {isRightPanelOpen ? (
               <>
@@ -4965,7 +5001,7 @@ export function CasesConsole({
           </div>
 
           {selectedCase && isRightPanelOpen ? (
-            <div className="grid gap-3">
+            <div className="grid gap-2">
               <ModuleBox
                 title={`Casos WhatsApp${
                   whatsappPendingCount > 0 ? ` · ${whatsappPendingCount}` : ""
@@ -5024,6 +5060,16 @@ export function CasesConsole({
                 <div className="grid gap-1.5">
                   {[
                     {
+                      key: "cases",
+                      label: "Casos",
+                      icon: <FileText className="h-3.5 w-3.5" aria-hidden="true" />,
+                    },
+                    {
+                      key: "qa",
+                      label: "Notas QA",
+                      icon: <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />,
+                    },
+                    {
                       key: "ai",
                       label: "IA",
                       icon: <Bot className="h-3.5 w-3.5" aria-hidden="true" />,
@@ -5037,6 +5083,11 @@ export function CasesConsole({
                       key: "activity",
                       label: "Actividad",
                       icon: <Activity className="h-3.5 w-3.5" aria-hidden="true" />,
+                    },
+                    {
+                      key: "email",
+                      label: "Correos",
+                      icon: <Mail className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     ...(canViewCallHistory
                       ? [
@@ -5064,7 +5115,7 @@ export function CasesConsole({
                       onClick={() =>
                         setRelatedView(item.key as Exclude<RelatedView, null>)
                       }
-                      className="flex h-9 items-center justify-between rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                      className="flex h-8 items-center justify-between rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       <span className="flex items-center gap-1.5">
                         {item.icon}
@@ -5079,22 +5130,16 @@ export function CasesConsole({
                 title="Historial de casos del cliente"
                 icon={<History className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <details open>
-                  <summary className="cursor-pointer text-xs font-bold text-[var(--g66-text-primary)]">
-                    WhatsApp
-                  </summary>
-                  <p className="mt-2 text-xs font-semibold text-[var(--g66-text-secondary)]">
-                    Caso actual: {formatCaseNumber(selectedCase.case_number, selectedCase.id)}
-                  </p>
-                </details>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs font-bold text-[var(--g66-text-primary)]">
-                    Email
-                  </summary>
-                  <p className="mt-2 text-xs font-semibold text-[var(--g66-text-secondary)]">
-                    Sin casos relacionados.
-                  </p>
-                </details>
+                <div className="grid gap-1.5">
+                  {caseItems
+                    .filter((caseItem) => selectedCase.customer_id && caseItem.customer_id === selectedCase.customer_id)
+                    .map((caseItem) => (
+                      <Link key={caseItem.id} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border-soft)] bg-[var(--g66-background)] p-2 text-xs font-bold text-[var(--g66-brand-blue)] hover:underline">
+                        {formatCaseNumber(caseItem.case_number, caseItem.id)} · {caseItem.subject || "Sin asunto"}
+                      </Link>
+                    ))}
+                  {!selectedCase.customer_id ? <p className="text-xs font-semibold text-[var(--g66-text-secondary)]">Cliente no relacionado.</p> : null}
+                </div>
               </ModuleBox>
               <ModuleBox
                 title="Información transaccional"
@@ -5150,6 +5195,16 @@ export function CasesConsole({
                   </p>
                 )}
               </ModuleBox>
+              <ModuleBox
+                title="Información de Sistema"
+                icon={<FileText className="h-3.5 w-3.5" aria-hidden="true" />}
+              >
+                <dl className="grid gap-2">
+                  <Field label="ID técnico" value={selectedCase.id} />
+                  <Field label="Creado" value={formatDateTime(selectedCase.created_at)} />
+                  <Field label="Actualizado" value={formatDateTime(selectedCase.updated_at)} />
+                </dl>
+              </ModuleBox>
             </div>
           ) : null}
         </aside>
@@ -5163,6 +5218,12 @@ export function CasesConsole({
             <h2 className="text-sm font-black text-[var(--g66-text-primary)]">
               {relatedView === "ai"
                 ? "IA"
+                : relatedView === "cases"
+                  ? "Casos"
+                  : relatedView === "qa"
+                    ? "Notas QA"
+                    : relatedView === "email"
+                      ? "Correos"
                 : relatedView === "history"
                   ? "Historial"
                   : relatedView === "activity"
@@ -5180,6 +5241,28 @@ export function CasesConsole({
             </button>
           </div>
           <div className="grid gap-3 p-3">
+            {relatedView === "cases" ? (
+              <div className="grid gap-2">
+                {caseItems.filter((caseItem) => selectedCase.customer_id && caseItem.customer_id === selectedCase.customer_id).map((caseItem) => (
+                  <Link key={`related-case-${caseItem.id}`} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border)] p-3 text-sm font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]">
+                    {formatCaseNumber(caseItem.case_number, caseItem.id)} · {caseItem.subject || "Sin asunto"}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+            {relatedView === "qa" ? (
+              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay notas QA asociadas.</p>
+            ) : null}
+            {relatedView === "email" ? (
+              <div className="grid gap-2">
+                {selectedCaseMessages.filter(isEmailMessage).map((message) => (
+                  <button key={`related-email-${message.id}`} type="button" onClick={() => setSelectedEmailMessage(message)} className="rounded-md border border-[var(--g66-border)] p-3 text-left text-sm font-bold text-[var(--g66-brand-blue)]">
+                    {message.email_subject || "Email sin asunto"}
+                  </button>
+                ))}
+                {selectedCaseMessages.filter(isEmailMessage).length === 0 ? <p className="rounded-md border border-dashed p-3 text-sm text-[var(--g66-text-secondary)]">No hay correos asociados.</p> : null}
+              </div>
+            ) : null}
             {relatedView === "ai" ? (
               <>
                 <Field label="Resumen IA" value={selectedCase.ai_summary || "Sin resumen IA"} />
