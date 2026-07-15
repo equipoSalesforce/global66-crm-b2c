@@ -7,6 +7,7 @@ import { getNavigationItems } from "@/lib/permissions";
 import { clearDemoCrmSession } from "@/lib/crm-users";
 import { DemoAvailabilitySelect } from "./demo-availability-select";
 import { Global66Mark } from "./global66-mark";
+import { NotificationBell } from "./notification-bell";
 import { ToastProvider } from "./toast-provider";
 import { useCrmSession } from "./use-crm-session";
 import { useCrmPermissions } from "./use-crm-permissions";
@@ -364,6 +365,9 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
               >
                 WhatsApp pendientes: {notificationCount}
               </Link>
+            ) : null}
+            {agentId ? (
+              <NotificationBell key={agentId} currentUserId={agentId} />
             ) : null}
             {agentId ? (
               <DemoAvailabilitySelect userId={agentId} compact />

@@ -1,6 +1,7 @@
 import type { CaseViewColumnKey } from "./case-view-service";
 
 export type CaseEditableFieldKey =
+  | "responseStatus"
   | "channel"
   | "contactType"
   | "product"
@@ -46,6 +47,20 @@ export const caseFieldDefinitions: Record<
   CaseEditableFieldKey,
   CaseFieldDefinition
 > = {
+  responseStatus: {
+    key: "responseStatus",
+    columnKey: "response",
+    label: "Respuesta",
+    editable: true,
+    type: "picklist",
+    persistFieldName: "response_status",
+    options: [
+      "NO_AGENT_ACTIVITY",
+      "NO_CUSTOMER_ACTIVITY_24H",
+      "WAITING_AGENT_RESPONSE",
+      "UP_TO_DATE",
+    ],
+  },
   channel: {
     key: "channel",
     columnKey: "channel",

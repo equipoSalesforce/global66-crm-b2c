@@ -1,7 +1,12 @@
 import { formatCaseNumber, normalizeLifecycleStatus } from "./case-status";
 import { computeCaseSlaStatus, type CaseSlaResult } from "./case-sla-service";
 import { supabase } from "./supabase";
-import type { CaseResponseMessage } from "./case-response-status-service";
+import {
+  getCaseResponseActivity,
+  isCaseResponseStatus,
+  type CaseResponseMessage,
+  type CaseResponseStatus,
+} from "./case-response-status-service";
 
 export type CaseViewMetricKey =
   | "total"
@@ -51,6 +56,7 @@ export type CaseViewRow = {
   isEdgeCase: boolean;
   isMerged: boolean;
   mergedIntoCaseId: string | null;
+  responseStatus: CaseResponseStatus;
   sla: CaseSlaResult;
 };
 
@@ -117,6 +123,7 @@ type CaseRecord = {
   subproduct?: string | null;
   is_merged?: boolean | null;
   merged_into_case_id?: string | null;
+  response_status?: string | null;
   customer: {
     email?: string | null;
   } | null;
@@ -130,16 +137,40 @@ export type CaseViewMessageRecord = CaseResponseMessage & {
 };
 
 export const defaultCaseViewColumns: CaseViewData["columns"] = [
-  { key: "number", label: "Número" },
+  { key: "number", label: "Número Caso" },
   { key: "email", label: "Correo" },
-  { key: "contactType", label: "Tipo de Contacto" },
   { key: "response", label: "Respuesta" },
+  { key: "contactType", label: "Tipo de Contacto" },
   { key: "catPrincipal", label: "CAT Principal" },
   { key: "catSecondary", label: "CAT Secundaria" },
   { key: "catExtra", label: "CAT Extra" },
   { key: "status", label: "Estado" },
   { key: "containmentContext", label: "Contexto Contención" },
+  { key: "owner", label: "Owner" },
+  { key: "priority", label: "Prioridad" },
+  { key: "isEdgeCase", label: "Caso Borde" },
+  { key: "channel", label: "Canal" },
+  { key: "product", label: "Producto" },
+  { key: "subproduct", label: "Subproducto" },
 ];
+
+export const mandatoryCaseViewColumns: CaseViewColumnKey[] = [
+  "number",
+  "email",
+  "response",
+];
+
+export function normalizeCaseViewColumns(columns: CaseViewColumnKey[] | null | undefined) {
+  const validColumns = new Set(defaultCaseViewColumns.map((column) => column.key));
+  const optionalColumns = (columns ?? []).filter(
+    (column, index, all) =>
+      validColumns.has(column) &&
+      !mandatoryCaseViewColumns.includes(column) &&
+      all.indexOf(column) === index,
+  );
+
+  return [...mandatoryCaseViewColumns, ...optionalColumns];
+}
 
 function groupMessagesByCase(messages: CaseViewMessageRecord[]) {
   const groupedMessages = new Map<string, CaseViewMessageRecord[]>();
@@ -167,15 +198,35 @@ function statusLabel(status: string) {
   return labels[status] ?? status.replaceAll("_", " ");
 }
 
-function isResolvedStatus(status: string) {
-  return status === "CLOSED" || status === "RESOLVED";
+function normalizedSummaryStatus(row: Pick<CaseViewRow, "status">) {
+  return row.status.trim().toUpperCase();
 }
 
-function isPendingCase(row: CaseViewRow) {
-  return (
-    (row.status === "NEW" || row.status === "IN_PROGRESS") &&
-    !row.sla.has_agent_interaction
-  );
+export function isResolvedCase(row: Pick<CaseViewRow, "status">) {
+  return normalizedSummaryStatus(row) === "RESOLVED";
+}
+
+export function isClosedCase(row: Pick<CaseViewRow, "status">) {
+  return normalizedSummaryStatus(row) === "CLOSED";
+}
+
+export function isMergedCase(row: Pick<CaseViewRow, "status" | "isMerged">) {
+  return normalizedSummaryStatus(row) === "MERGED" || row.isMerged;
+}
+
+export function isActiveForSummary(
+  row: Pick<CaseViewRow, "status" | "isMerged">,
+) {
+  return !isResolvedCase(row) && !isClosedCase(row) && !isMergedCase(row);
+}
+
+export function isPendingCase(row: Pick<CaseViewRow, "status">) {
+  const status = normalizedSummaryStatus(row);
+  return status === "NEW" || status === "IN_PROGRESS";
+}
+
+export function isStandByCase(row: Pick<CaseViewRow, "status">) {
+  return normalizedSummaryStatus(row) === "STAND_BY";
 }
 
 function isEdgeCase(caseItem: CaseRecord) {
@@ -194,10 +245,11 @@ function buildRows(cases: CaseRecord[], messages: CaseViewMessageRecord[]) {
     .map<CaseViewRow>((caseItem) => {
       const id = String(caseItem.id);
       const status = normalizeLifecycleStatus(
-        caseItem.lifecycle_status,
-        caseItem.status,
+        caseItem.lifecycle_status?.trim().toUpperCase(),
+        caseItem.status?.trim().toUpperCase(),
       );
       const caseMessages = messagesByCase.get(id) ?? [];
+      const calculatedResponse = getCaseResponseActivity(caseMessages);
       const sla = computeCaseSlaStatus(
         {
           channel: caseItem.channel,
@@ -235,6 +287,9 @@ function buildRows(cases: CaseRecord[], messages: CaseViewMessageRecord[]) {
         isMerged: Boolean(caseItem.is_merged || status === "MERGED"),
         mergedIntoCaseId: caseItem.merged_into_case_id ?? null,
         sla,
+        responseStatus: isCaseResponseStatus(caseItem.response_status)
+          ? caseItem.response_status
+          : calculatedResponse.response_status,
       };
     })
     .sort((caseA, caseB) => {
@@ -246,46 +301,54 @@ function buildRows(cases: CaseRecord[], messages: CaseViewMessageRecord[]) {
 }
 
 function buildMetrics(rows: CaseViewRow[]): CaseViewMetric[] {
+  const activeRows = rows.filter(isActiveForSummary);
   return [
-    { key: "total", label: "TOTAL CASOS", value: rows.length },
+    { key: "total", label: "TOTAL CASOS", value: activeRows.length },
     { key: "pending", label: "PENDIENTES", value: rows.filter(isPendingCase).length },
     {
       key: "waiting",
       label: "ESPERANDO",
-      value: rows.filter((row) => row.sla.is_waiting_for_agent).length,
+      value: activeRows.filter(
+        (row) => row.responseStatus === "WAITING_AGENT_RESPONSE",
+      ).length,
     },
     {
       key: "risk",
       label: "EN RIESGO",
-      value: rows.filter(
+      value: activeRows.filter(
         (row) =>
           row.sla.first_response_sla_breached ||
           row.sla.between_responses_sla_breached,
       ).length,
     },
-    { key: "edge", label: "BORDES", value: rows.filter((row) => row.isEdgeCase).length },
-    { key: "standBy", label: "STAND BY", value: rows.filter((row) => row.status === "STAND_BY").length },
+    { key: "edge", label: "BORDES", value: activeRows.filter((row) => row.isEdgeCase).length },
+    { key: "standBy", label: "STAND BY", value: rows.filter(isStandByCase).length },
     {
       key: "resolved",
       label: "RESUELTOS",
-      value: rows.filter((row) => isResolvedStatus(row.status)).length,
+      value: rows.filter(isResolvedCase).length,
     },
   ];
 }
 
 export function filterRowsByMetric(rows: CaseViewRow[], metric: CaseViewMetricKey) {
+  const activeRows = rows.filter(isActiveForSummary);
   if (metric === "pending") return rows.filter(isPendingCase);
-  if (metric === "waiting") return rows.filter((row) => row.sla.is_waiting_for_agent);
+  if (metric === "waiting") {
+    return activeRows.filter(
+      (row) => row.responseStatus === "WAITING_AGENT_RESPONSE",
+    );
+  }
   if (metric === "risk") {
-    return rows.filter(
+    return activeRows.filter(
       (row) =>
         row.sla.first_response_sla_breached ||
         row.sla.between_responses_sla_breached,
     );
   }
-  if (metric === "edge") return rows.filter((row) => row.isEdgeCase);
-  if (metric === "standBy") return rows.filter((row) => row.status === "STAND_BY");
-  if (metric === "resolved") return rows.filter((row) => isResolvedStatus(row.status));
+  if (metric === "edge") return activeRows.filter((row) => row.isEdgeCase);
+  if (metric === "standBy") return rows.filter(isStandByCase);
+  if (metric === "resolved") return rows.filter(isResolvedCase);
 
   return rows;
 }
@@ -316,7 +379,7 @@ function rowMatchesSearch(row: CaseViewRow, searchTerm: string) {
     row.number,
     row.email,
     row.contactType,
-    row.sla.response_label,
+    row.responseStatus,
     row.catPrincipal,
     row.catSecondary,
     row.catExtra,
@@ -382,11 +445,19 @@ export async function getCaseViewData(): Promise<{
   data: CaseViewData | null;
   error: string | null;
 }> {
+  const { error: responseStatusError } = await supabase.rpc(
+    "recalculate_all_case_response_statuses",
+  );
+
+  if (responseStatusError) {
+    return { data: null, error: responseStatusError.message };
+  }
+
   const [casesResult, messagesResult] = await Promise.all([
     supabase
       .from("cases")
       .select(
-        "id, case_number, subject, channel, contact_type, status, lifecycle_status, priority, assigned_agent_id, assigned_to, area, category, contact_email, created_at, updated_at, resolution_type, ai_summary, ai_category, ai_resolution, product, subproduct, is_edge_case, is_merged, merged_into_case_id, customer:customers(email)",
+        "id, case_number, subject, channel, contact_type, status, lifecycle_status, priority, assigned_agent_id, assigned_to, area, category, contact_email, created_at, updated_at, resolution_type, ai_summary, ai_category, ai_resolution, product, subproduct, is_edge_case, is_merged, merged_into_case_id, response_status, customer:customers(email)",
       )
       .order("created_at", { ascending: false })
       .returns<CaseRecord[]>(),

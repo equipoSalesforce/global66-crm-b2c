@@ -35,12 +35,14 @@ type CaseOperationRecord = {
   is_edge_case?: boolean | null;
   is_merged?: boolean | null;
   merged_into_case_id?: string | null;
+  response_status?: string | null;
 };
 
 const selectColumns =
-  "id, case_number, channel, contact_type, lifecycle_status, status, priority, area, category, ai_category, resolution_type, assigned_agent_id, assigned_to, product, subproduct, is_edge_case, is_merged, merged_into_case_id";
+  "id, case_number, channel, contact_type, lifecycle_status, status, priority, area, category, ai_category, resolution_type, assigned_agent_id, assigned_to, product, subproduct, is_edge_case, is_merged, merged_into_case_id, response_status";
 
 function valueForField(caseItem: CaseOperationRecord, key: CaseEditableFieldKey) {
+  if (key === "responseStatus") return caseItem.response_status ?? null;
   if (key === "channel") return caseItem.channel;
   if (key === "contactType") return caseItem.contact_type;
   if (key === "product") return caseItem.product ?? null;
@@ -255,13 +257,16 @@ export async function changeCasesOwnerInSupabase({
   caseIds,
   owner,
   actorUser,
+  notifyOwner = false,
 }: {
   supabase: SupabaseClient;
   caseIds: string[];
   owner: AssignableUser;
   actorUser?: CaseAuditActor;
+  notifyOwner?: boolean;
 }) {
-  const existingCases = await getCasesForOperations(supabase, caseIds);
+  const uniqueCaseIds = Array.from(new Set(caseIds));
+  const existingCases = await getCasesForOperations(supabase, uniqueCaseIds);
   const now = new Date().toISOString();
   const { error } = await supabase
     .from("cases")
@@ -271,10 +276,44 @@ export async function changeCasesOwnerInSupabase({
       assigned_at: now,
       updated_at: now,
     })
-    .in("id", caseIds);
+    .in("id", uniqueCaseIds);
 
   if (error) {
     throw error;
+  }
+
+  let notificationStatus: "not_requested" | "sent" | "failed" =
+    "not_requested";
+  let notificationsCreated = 0;
+
+  if (notifyOwner && existingCases.length > 0) {
+    const { error: notificationError } = await supabase
+      .from("case_assignment_notifications")
+      .insert(
+        existingCases.map((caseItem) => ({
+          case_id: caseItem.id,
+          case_number: caseItem.case_number,
+          previous_owner_user_id: caseItem.assigned_agent_id,
+          previous_owner_name: caseItem.assigned_to,
+          assigned_to_user_id: owner.id,
+          assigned_to_name: owner.name,
+          assigned_by_user_id: actorUser?.userId ?? null,
+          assigned_by_name: actorUser?.name ?? "Usuario demo",
+          title: "Nuevo caso asignado",
+          message: `Se te asignó el caso #${caseItem.case_number ?? caseItem.id}.`,
+        })),
+      );
+
+    if (notificationError) {
+      notificationStatus = "failed";
+      console.error(
+        "[case-owner] Owner changed but notification creation failed",
+        notificationError,
+      );
+    } else {
+      notificationStatus = "sent";
+      notificationsCreated = existingCases.length;
+    }
   }
 
   await createCaseAuditEvents(
@@ -292,11 +331,19 @@ export async function changeCasesOwnerInSupabase({
         title: "Owner cambiado desde Vista de Casos",
         description: `Owner cambiado de ${caseItem.assigned_to ?? "Sin owner"} a ${owner.name}`,
         ownerId: owner.id,
+        notificationRequested: notifyOwner,
+        notificationCreated: notificationStatus === "sent",
       },
     })),
   );
 
-  return { updated: caseIds.length, owner, caseIds };
+  return {
+    updated: existingCases.length,
+    owner,
+    caseIds: uniqueCaseIds,
+    notificationStatus,
+    notificationsCreated,
+  };
 }
 
 export async function mergeCasesInSupabase({
