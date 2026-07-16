@@ -4,6 +4,7 @@ export type EmailRewriteAction = "formalize" | "clarify" | "shorten" | "empathet
 
 export type EmailRewriteContext = {
   case?: {
+    id?: string | null;
     case_number?: string | null;
     subject?: string | null;
     status?: string | null;
