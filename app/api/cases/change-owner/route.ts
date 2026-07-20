@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 type ChangeOwnerRequest = {
   caseIds?: string[];
   newOwnerId?: string;
+  notifyOwner?: boolean;
   actorUser?: {
     userId?: string | null;
     name?: string | null;
@@ -48,7 +49,7 @@ async function getAssignableUser(ownerId: string): Promise<AssignableUser | null
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChangeOwnerRequest;
-    const caseIds = body.caseIds?.filter(Boolean) ?? [];
+    const caseIds = Array.from(new Set(body.caseIds?.filter(Boolean) ?? []));
 
     if (caseIds.length === 0 || !body.newOwnerId) {
       return Response.json(
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       caseIds,
       owner,
       actorUser: body.actorUser,
+      notifyOwner: body.notifyOwner === true,
     });
 
     return Response.json({ ok: true, ...result });

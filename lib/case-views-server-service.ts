@@ -4,7 +4,11 @@ import type {
   CaseSavedView,
   CaseSavedViewFilters,
 } from "./case-views-storage-service";
-import type { CaseViewColumnKey, CaseViewSorting } from "./case-view-service";
+import {
+  normalizeCaseViewColumns,
+  type CaseViewColumnKey,
+  type CaseViewSorting,
+} from "./case-view-service";
 
 type CaseViewRow = {
   id: string;
@@ -96,7 +100,7 @@ function toCaseSavedView(
     description: row.description ?? "",
     privacy: privacyFromDb[row.privacy],
     editableByOthers: row.is_editable_by_others ? "Sí" : "No",
-    visibleColumns: row.visible_fields ?? [],
+    visibleColumns: normalizeCaseViewColumns(row.visible_fields),
     filters: normalizeFilters(row.filters),
     sorting: row.sort_config?.sorting ?? "updated_desc",
     useAsDefault: row.id === defaultViewId,
@@ -189,7 +193,7 @@ export async function createCaseViewForUser(
       privacy,
       team_id: privacy === "TEAM" ? user.teamId : user.teamId,
       is_editable_by_others: payload.editableByOthers === "Sí",
-      visible_fields: payload.visibleColumns ?? [],
+      visible_fields: normalizeCaseViewColumns(payload.visibleColumns),
       filters: payload.filters ?? {},
       sort_config: { sorting: payload.sorting ?? "updated_desc" },
     })
@@ -252,7 +256,9 @@ export async function updateCaseViewForUser(
   if (payload.editableByOthers !== undefined) {
     updatePayload.is_editable_by_others = payload.editableByOthers === "Sí";
   }
-  if (payload.visibleColumns !== undefined) updatePayload.visible_fields = payload.visibleColumns;
+  if (payload.visibleColumns !== undefined) {
+    updatePayload.visible_fields = normalizeCaseViewColumns(payload.visibleColumns);
+  }
   if (payload.filters !== undefined) updatePayload.filters = payload.filters;
   if (payload.sorting !== undefined) updatePayload.sort_config = { sorting: payload.sorting };
 

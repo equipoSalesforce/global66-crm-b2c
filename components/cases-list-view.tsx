@@ -2,12 +2,15 @@
 
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   BarChart3,
   Bookmark,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock3,
   Edit3,
   Filter,
@@ -19,7 +22,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings,
   UserCog,
   X,
 } from "lucide-react";
@@ -28,11 +30,17 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   buildCaseViewModel,
+  mandatoryCaseViewColumns,
+  normalizeCaseViewColumns,
   type CaseViewColumnKey,
   type CaseViewData,
   type CaseViewMetricKey,
   type CaseViewRow,
 } from "@/lib/case-view-service";
+import {
+  getCaseResponseLabel,
+  type CaseResponseStatus,
+} from "@/lib/case-response-status-service";
 import {
   createCaseView,
   emptyCaseViewFilters,
@@ -59,7 +67,7 @@ type CasesListViewProps = {
   data: CaseViewData | null;
 };
 
-type ModalMode = "create" | "edit" | "properties";
+type ModalMode = "create" | "edit";
 type OperationModal = "merge" | "owner" | null;
 type CaseFieldChanges = Partial<
   Record<CaseEditableFieldKey, string | boolean | null>
@@ -136,33 +144,24 @@ function buildDraft({
     description: view?.description ?? "",
     privacy: view?.privacy ?? "Privada",
     editableByOthers: view?.editableByOthers ?? "No",
-    visibleColumns:
-      view?.visibleColumns.length ? view.visibleColumns : visibleColumns.length ? visibleColumns : columns.map((column) => column.key),
+    visibleColumns: normalizeCaseViewColumns(
+      view?.visibleColumns.length
+        ? view.visibleColumns
+        : visibleColumns.length
+          ? visibleColumns
+          : columns.map((column) => column.key),
+    ),
     filters: view?.filters ?? currentFilters,
     sorting: view?.sorting ?? sorting,
     useAsDefault: view?.useAsDefault ?? false,
   };
 }
 
-function responseBadgeClass(status: CaseViewRow["sla"]["response_status"]) {
-  if (status === "RED") return "bg-[#FDECEC] text-[#DC2626]";
-  if (status === "YELLOW") return "bg-[#FEF6E0] text-[#B45309]";
-
+function responseBadgeClass(status: CaseResponseStatus) {
+  if (status === "NO_AGENT_ACTIVITY") return "bg-[#FEF6E0] text-[#B45309]";
+  if (status === "NO_CUSTOMER_ACTIVITY_24H") return "bg-[#FFF1E5] text-[#C2410C]";
+  if (status === "WAITING_AGENT_RESPONSE") return "bg-[#FDECEC] text-[#DC2626]";
   return "bg-[#D9F6E8] text-[#0E9F6E]";
-}
-
-function metricLabel(metric: CaseViewMetricKey) {
-  const labels: Record<CaseViewMetricKey, string> = {
-    total: "",
-    pending: "· Pendientes",
-    waiting: "· Esperando respuesta",
-    risk: "· En riesgo",
-    edge: "· Casos borde",
-    standBy: "· En stand by",
-    resolved: "· Resueltos",
-  };
-
-  return labels[metric];
 }
 
 function getCellValue(row: CaseViewRow, column: CaseViewColumnKey) {
@@ -170,7 +169,7 @@ function getCellValue(row: CaseViewRow, column: CaseViewColumnKey) {
     number: row.number,
     email: row.email,
     contactType: row.contactType,
-    response: row.sla.response_label,
+    response: getCaseResponseLabel(row.responseStatus),
     catPrincipal: row.catPrincipal,
     catSecondary: row.catSecondary,
     catExtra: row.catExtra,
@@ -188,6 +187,7 @@ function getCellValue(row: CaseViewRow, column: CaseViewColumnKey) {
 }
 
 function getRowEditableValue(row: CaseViewRow, field: CaseEditableFieldKey) {
+  if (field === "responseStatus") return row.responseStatus;
   if (field === "ownerId") return row.ownerId ?? "";
 
   return row[field];
@@ -257,19 +257,39 @@ function ViewConfigModal({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const title =
-    mode === "create"
-      ? "Crear Vista"
-      : mode === "edit"
-        ? "Editar Vista"
-        : "Propiedades de la Vista";
+  const title = "Seleccionar los campos que se visualizarán";
+  const modeLabel = mode === "create" ? "Crear Vista" : "Editar Vista";
   const actionLabel = mode === "create" ? "Crear vista" : "Guardar cambios";
 
-  function toggleColumn(column: CaseViewColumnKey) {
-    const visibleColumns = draft.visibleColumns.includes(column)
-      ? draft.visibleColumns.filter((item) => item !== column)
-      : [...draft.visibleColumns, column];
+  function addColumn(column: CaseViewColumnKey) {
+    setDraft({
+      ...draft,
+      visibleColumns: normalizeCaseViewColumns([...draft.visibleColumns, column]),
+    });
+  }
 
+  function removeColumn(column: CaseViewColumnKey) {
+    if (mandatoryCaseViewColumns.includes(column)) return;
+    setDraft({
+      ...draft,
+      visibleColumns: draft.visibleColumns.filter((item) => item !== column),
+    });
+  }
+
+  function moveColumn(column: CaseViewColumnKey, direction: -1 | 1) {
+    const currentIndex = draft.visibleColumns.indexOf(column);
+    const nextIndex = currentIndex + direction;
+    if (
+      currentIndex < mandatoryCaseViewColumns.length ||
+      nextIndex < mandatoryCaseViewColumns.length ||
+      nextIndex >= draft.visibleColumns.length
+    ) return;
+
+    const visibleColumns = [...draft.visibleColumns];
+    [visibleColumns[currentIndex], visibleColumns[nextIndex]] = [
+      visibleColumns[nextIndex],
+      visibleColumns[currentIndex],
+    ];
     setDraft({ ...draft, visibleColumns });
   }
 
@@ -284,7 +304,7 @@ function ViewConfigModal({
           <div>
             <h2 className="text-lg font-black text-slate-950">{title}</h2>
             <p className="mt-1 text-xs font-medium text-slate-500">
-              Las vistas se guardan localmente hasta tener el backend definitivo.
+              {modeLabel} · Configura filtros, privacidad y columnas de la vista guardada.
             </p>
           </div>
           <button
@@ -385,25 +405,49 @@ function ViewConfigModal({
               <ModalFilter label="Estado" value={draft.filters.status} options={options.status} onChange={(value) => updateFilter("status", value)} />
             </div>
           </fieldset>
-          <fieldset className="grid gap-2 rounded-xl border border-[#E4E9F0] p-3 md:col-span-2">
+          <fieldset className="grid gap-3 rounded-xl border border-[#E4E9F0] p-3 md:col-span-2">
             <legend className="px-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-500">
-              Campos visibles
+              Columnas de la vista
             </legend>
-            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-              {columns.map((column) => (
-                <label
-                  key={column.key}
-                  className="flex items-center gap-2 rounded-lg border border-[#EEF1F6] bg-[#FBFCFE] px-3 py-2 text-xs font-semibold text-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={draft.visibleColumns.includes(column.key)}
-                    onChange={() => toggleColumn(column.key)}
-                    className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
-                  />
-                  {column.label}
-                </label>
-              ))}
+            <p className="text-xs font-medium text-slate-500">
+              Número Caso, Correo y Respuesta son obligatorias. Agrega, quita y ordena las demás columnas.
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-500">Disponibles</p>
+                <div className="min-h-52 space-y-1.5 rounded-lg border border-[#DDE5F1] bg-[#FBFCFE] p-2">
+                  {columns.filter((column) => !draft.visibleColumns.includes(column.key)).map((column) => (
+                    <button key={column.key} type="button" onClick={() => addColumn(column.key)} className="flex w-full items-center justify-between rounded-md border border-[#EEF1F6] bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-[#BFD0F5] hover:text-[#205EEF]">
+                      {column.label}<ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-500">Visibles</p>
+                <div className="min-h-52 space-y-1.5 rounded-lg border border-[#BFD0F5] bg-[#F5F8FF] p-2">
+                  {draft.visibleColumns.map((columnKey, index) => {
+                    const column = columns.find((item) => item.key === columnKey);
+                    if (!column) return null;
+                    const mandatory = mandatoryCaseViewColumns.includes(columnKey);
+                    return (
+                      <div key={columnKey} className="flex items-center gap-1 rounded-md border border-[#D6E0F5] bg-white px-2 py-1.5 text-xs font-semibold text-slate-700">
+                        <span className="w-5 text-[10px] font-black text-slate-400">{index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate">{column.label}</span>
+                        {mandatory ? (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-slate-500">Fija</span>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => moveColumn(columnKey, -1)} disabled={index === mandatoryCaseViewColumns.length} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Subir ${column.label}`}><ChevronUp className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => moveColumn(columnKey, 1)} disabled={index === draft.visibleColumns.length - 1} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Bajar ${column.label}`}><ChevronDown className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => removeColumn(columnKey)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Quitar ${column.label}`}><ArrowLeft className="h-3.5 w-3.5" /></button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </fieldset>
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 md:col-span-2">
@@ -599,9 +643,10 @@ function ChangeOwnerModal({
   selectedCases: CaseViewRow[];
   users: AssignableUser[];
   onClose: () => void;
-  onChangeOwner: (ownerId: string) => void;
+  onChangeOwner: (ownerId: string, notifyOwner: boolean) => void;
 }) {
   const [ownerId, setOwnerId] = useState(users[0]?.id ?? "");
+  const [notifyOwner, setNotifyOwner] = useState(false);
   const selectedOwnerId = ownerId || users[0]?.id || "";
 
   return (
@@ -641,6 +686,15 @@ function ChangeOwnerModal({
               ))}
             </select>
           </label>
+          <label className="flex items-center gap-2 rounded-xl border border-[#E6EBF3] bg-[#FBFCFE] px-3 py-3 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={notifyOwner}
+              onChange={(event) => setNotifyOwner(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
+            />
+            Notificar al nuevo owner
+          </label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-[#EEF1F6] bg-[#FBFCFE] px-5 py-4">
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-4 text-xs font-bold text-slate-600">
@@ -649,7 +703,7 @@ function ChangeOwnerModal({
           <button
             type="button"
             disabled={!selectedOwnerId}
-            onClick={() => onChangeOwner(selectedOwnerId)}
+            onClick={() => onChangeOwner(selectedOwnerId, notifyOwner)}
             className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white disabled:opacity-45"
           >
             Cambiar owner
@@ -681,7 +735,7 @@ export function CasesListView({ data }: CasesListViewProps) {
   const [filters, setFilters] = useState<CaseSavedViewFilters>(emptyCaseViewFilters);
   const [sorting, setSorting] = useState<CaseSavedView["sorting"]>("updated_desc");
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<CaseViewColumnKey[]>(
-    () => columns.map((column) => column.key),
+    () => normalizeCaseViewColumns(columns.map((column) => column.key)),
   );
   const [savedViews, setSavedViews] = useState<CaseSavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
@@ -718,7 +772,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           setActiveViewId(defaultView.id);
           setFilters(defaultView.filters);
           setSorting(defaultView.sorting);
-          setVisibleColumnKeys(defaultView.visibleColumns);
+          setVisibleColumnKeys(normalizeCaseViewColumns(defaultView.visibleColumns));
           setDraft(
             buildDraft({
               columns,
@@ -745,7 +799,6 @@ export function CasesListView({ data }: CasesListViewProps) {
 
   const activeView = savedViews.find((view) => view.id === activeViewId) ?? null;
   const currentViewName = activeView?.name ?? "Vista de Casos";
-  const activeMetricLabel = metricLabel(activeMetric);
 
   const options: FilterOptions = useMemo(
     () => ({
@@ -775,9 +828,9 @@ export function CasesListView({ data }: CasesListViewProps) {
   );
   const metrics = viewModel.metrics;
   const visibleRows = viewModel.paginatedCases;
-  const visibleColumns = columns.filter((column) =>
-    visibleColumnKeys.includes(column.key),
-  );
+  const visibleColumns = visibleColumnKeys
+    .map((key) => columns.find((column) => column.key === key))
+    .filter((column): column is CaseViewData["columns"][number] => Boolean(column));
   const selectedRows = rows.filter((row) => selectedCaseIds.has(row.id));
   const allVisibleSelected =
     visibleRows.length > 0 && visibleRows.every((row) => selectedCaseIds.has(row.id));
@@ -902,17 +955,26 @@ export function CasesListView({ data }: CasesListViewProps) {
     }
   }
 
-  async function executeOwnerChange(ownerId: string) {
+  async function executeOwnerChange(ownerId: string, notifyOwner: boolean) {
     setOperationStatus("Cambiando owner...");
     try {
-      await changeCasesOwner({
+      const result = await changeCasesOwner({
         caseIds: selectedRows.map((row) => row.id),
         newOwnerId: ownerId,
+        notifyOwner,
       });
       setSelectedCaseIds(new Set());
       setOperationModal(null);
       refreshOperations();
-      showOperationStatus("Owner actualizado correctamente");
+      if (result.notificationStatus === "failed") {
+        showOperationStatus(
+          "Owner actualizado, pero no se pudo crear la notificación.",
+        );
+      } else if (result.notificationStatus === "sent") {
+        showOperationStatus("Owner actualizado y notificación enviada.");
+      } else {
+        showOperationStatus("Owner actualizado.");
+      }
     } catch (error) {
       showOperationStatus(
         error instanceof Error ? error.message : "Error al cambiar owner.",
@@ -938,6 +1000,8 @@ export function CasesListView({ data }: CasesListViewProps) {
                     ? options.catExtra
                     : definition.key === "status"
                       ? options.status
+                      : definition.key === "responseStatus"
+                        ? definition.options ?? []
                       : definition.key === "priority"
                         ? uniqueOptions(rows, (row) => row.priority)
                         : [];
@@ -965,9 +1029,9 @@ export function CasesListView({ data }: CasesListViewProps) {
     if (column.key === "response") {
       return (
         <span
-          className={`inline-flex rounded-md px-2.5 py-1 text-[10.5px] font-bold ${responseBadgeClass(row.sla.response_status)}`}
+          className={`inline-flex rounded-md px-2.5 py-1 text-[10.5px] font-bold ${responseBadgeClass(row.responseStatus)}`}
         >
-          {row.sla.response_label}
+          {getCaseResponseLabel(row.responseStatus)}
         </span>
       );
     }
@@ -997,7 +1061,9 @@ export function CasesListView({ data }: CasesListViewProps) {
         >
           {getPicklistOptions(fieldDefinition).map((option) => (
             <option key={option} value={option}>
-              {option}
+              {editableField.key === "responseStatus"
+                ? getCaseResponseLabel(option as CaseResponseStatus)
+                : option}
             </option>
           ))}
         </select>
@@ -1052,7 +1118,7 @@ export function CasesListView({ data }: CasesListViewProps) {
     setActiveViewId(view.id);
     setFilters(view.filters);
     setSorting(view.sorting);
-    setVisibleColumnKeys(view.visibleColumns);
+    setVisibleColumnKeys(normalizeCaseViewColumns(view.visibleColumns));
     setDraft(
       buildDraft({
         columns,
@@ -1072,7 +1138,7 @@ export function CasesListView({ data }: CasesListViewProps) {
     setActiveMetric("total");
     setFilters(emptyCaseViewFilters);
     setSorting("updated_desc");
-    setVisibleColumnKeys(columns.map((column) => column.key));
+    setVisibleColumnKeys(normalizeCaseViewColumns(columns.map((column) => column.key)));
     setActiveViewId(null);
     setIsViewListOpen(false);
     setSelectedCaseIds(new Set());
@@ -1189,19 +1255,14 @@ export function CasesListView({ data }: CasesListViewProps) {
   const isActiveViewReadOnly = Boolean(activeView && !activeView.canEdit);
 
   return (
-    <section className="min-h-full bg-[#F4F6FA] px-6 py-6 text-slate-800">
-      <div className="mx-auto max-w-[1510px]">
-        <header className="mb-5 rounded-2xl border border-[#E6EBF3] bg-white px-6 py-5 shadow-[0_2px_8px_rgba(15,23,42,.04)]">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="text-[30px] font-black leading-tight tracking-[-.03em] text-[#08111F]">
+    <section className="min-h-full bg-[#F4F6FA] px-5 py-5 text-slate-800 lg:px-6">
+      <div className="mx-auto max-w-[1600px]">
+        <header className="mb-3 py-1">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="truncate text-[31px] font-black leading-tight tracking-[-.035em] text-[#08111F]">
                 {currentViewName}
               </h1>
-              {activeMetricLabel ? (
-                <p className="mt-2 text-sm font-bold text-slate-500">
-                  {activeMetricLabel}
-                </p>
-              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <ToolbarButton onClick={() => openModal("create")}>
@@ -1219,13 +1280,6 @@ export function CasesListView({ data }: CasesListViewProps) {
                 <Bookmark className="h-3.5 w-3.5" />
                 Guardar Vista
               </ToolbarButton>
-              <ToolbarButton
-                disabled={isActiveViewReadOnly}
-                onClick={() => openModal("properties")}
-              >
-                <Settings className="h-3.5 w-3.5" />
-                Propiedades
-              </ToolbarButton>
               <Link
                 href="/casos/nuevo"
                 className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.24)] hover:bg-[#1548c7]"
@@ -1237,19 +1291,12 @@ export function CasesListView({ data }: CasesListViewProps) {
           </div>
         </header>
 
-        {isActiveViewReadOnly ? (
-          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
-            Esta vista es pública o de equipo, pero tu usuario demo sólo puede
-            verla. No puede modificarla porque “Modificable por terceros” está en No.
-          </div>
-        ) : null}
-
-        <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="relative">
             <button
               type="button"
               onClick={() => setIsViewListOpen((current) => !current)}
-              className="inline-flex h-10 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.22)] hover:bg-[#1548c7]"
+              className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_8px_18px_rgba(32,94,239,.18)] hover:bg-[#1548c7]"
             >
               <List className="h-3.5 w-3.5" />
               Lista de Vistas
@@ -1306,7 +1353,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           ) : null}
         </div>
 
-        <div className="mb-5 grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+        <div className="mb-4 grid gap-2.5 md:grid-cols-4 xl:grid-cols-7">
           {metrics.map((metric) => {
             const isActive = activeMetric === metric.key;
             const visual = metricIcons[metric.key];
@@ -1322,7 +1369,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                       : metric.key,
                   )
                 }
-                className={`min-h-[74px] rounded-xl border bg-white px-4 py-3 text-left shadow-[0_4px_12px_rgba(15,23,42,.045)] transition hover:-translate-y-0.5 ${
+                className={`min-h-[72px] rounded-xl border bg-white px-3.5 py-2.5 text-left shadow-[0_3px_10px_rgba(15,23,42,.04)] transition hover:-translate-y-0.5 ${
                   isActive
                     ? "border-[#205EEF] bg-[#F5F8FF] shadow-[0_12px_26px_rgba(32,94,239,.13)]"
                     : "border-[#E6EBF3] hover:border-[#D6E0F5]"
@@ -1336,7 +1383,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                     {visual.icon}
                   </span>
                 </span>
-                <span className="mt-2 block text-2xl font-black leading-none text-[#08111F]">
+                <span className="mt-1.5 block text-[22px] font-black leading-none text-[#08111F]">
                   {metric.value.toLocaleString("es-CL")}
                 </span>
               </button>
@@ -1344,19 +1391,14 @@ export function CasesListView({ data }: CasesListViewProps) {
           })}
         </div>
 
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <p className="mr-2 text-base font-black text-[#08111F]">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <p className="text-[15px] font-black text-[#08111F]">
             {viewModel.totalForPagination.toLocaleString("es-CL")} casos
-            {activeMetricLabel ? (
-              <span className="ml-2 text-xs font-semibold text-slate-400">
-                {activeMetricLabel}
-              </span>
-            ) : null}
           </p>
         </div>
 
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <label className="flex h-10 min-w-[260px] flex-1 items-center gap-2 rounded-[9px] border border-[#E4E9F0] bg-white px-3 text-xs text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,.03)] md:max-w-[300px]">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label className="flex h-9 min-w-[250px] flex-1 items-center gap-2 rounded-[9px] border border-[#E4E9F0] bg-white px-3 text-xs text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,.03)] md:max-w-[290px]">
             <Search className="h-3.5 w-3.5" />
             <input
               value={search}
@@ -1365,7 +1407,7 @@ export function CasesListView({ data }: CasesListViewProps) {
               className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
             />
           </label>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {isInlineEditing ? (
               <>
                 <ToolbarButton onClick={saveInlineChanges}>
@@ -1377,7 +1419,10 @@ export function CasesListView({ data }: CasesListViewProps) {
                 </ToolbarButton>
               </>
             ) : (
-              <ToolbarButton onClick={() => setIsInlineEditing(true)}>
+              <ToolbarButton
+                variant="primary"
+                onClick={() => setIsInlineEditing(true)}
+              >
                 <Edit3 className="h-3.5 w-3.5" />
                 Modo edición
               </ToolbarButton>
@@ -1400,7 +1445,7 @@ export function CasesListView({ data }: CasesListViewProps) {
         </div>
 
         {selectedCaseIds.size > 0 || isInlineEditing ? (
-          <div className="mb-3 rounded-xl border border-[#D6E0F5] bg-[#F5F8FF] px-4 py-3 text-xs font-bold text-[#205EEF]">
+          <div className="mb-3 rounded-xl border border-[#D6E0F5] bg-[#F5F8FF] px-4 py-2.5 text-xs font-bold text-[#205EEF]">
             {selectedCaseIds.size > 0 ? (
               <span>
                 {selectedCaseIds.size.toLocaleString("es-CL")} caso
@@ -1427,7 +1472,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           <FilterSelect label="Estado" value={filters.status} onChange={(value) => updateFilter("status", value)} options={options.status} />
           <button
             type="button"
-            onClick={() => openModal("properties")}
+            onClick={() => openModal("edit")}
             className="inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#D6E0F5] bg-[#F5F8FF] px-3.5 text-xs font-bold text-[#205EEF] shadow-[0_1px_2px_rgba(15,23,42,.03)]"
           >
             <Filter className="h-3.5 w-3.5" />
@@ -1440,7 +1485,7 @@ export function CasesListView({ data }: CasesListViewProps) {
             <table className="w-full min-w-[1180px] border-separate border-spacing-0 text-left">
               <thead>
                 <tr className="bg-[#FBFCFE]">
-                  <th className="w-12 border-b border-[#EEF1F6] px-4 py-3">
+                  <th className="w-12 border-b border-[#EEF1F6] px-4 py-2.5">
                     <input
                       type="checkbox"
                       checked={allVisibleSelected}
@@ -1452,7 +1497,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                   {visibleColumns.map((column) => (
                     <th
                       key={column.key}
-                      className="border-b border-[#EEF1F6] px-3 py-3 text-[10px] font-black uppercase tracking-[.06em] text-slate-400"
+                      className="border-b border-[#EEF1F6] px-3 py-2.5 text-[10px] font-black uppercase tracking-[.06em] text-slate-400"
                     >
                       {column.label}
                     </th>
@@ -1462,7 +1507,7 @@ export function CasesListView({ data }: CasesListViewProps) {
               <tbody>
                 {visibleRows.map((row) => (
                   <tr key={row.id} className="bg-white hover:bg-[#FBFCFE]">
-                    <td className="border-b border-[#F1F4F8] px-4 py-3">
+                    <td className="border-b border-[#F1F4F8] px-4 py-2.5">
                       <input
                         type="checkbox"
                         checked={selectedCaseIds.has(row.id)}
@@ -1474,7 +1519,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                     {visibleColumns.map((column) => (
                       <td
                         key={`${row.id}-${column.key}`}
-                        className="max-w-[220px] truncate border-b border-[#F1F4F8] px-3 py-3 text-[11.5px] font-medium text-slate-600"
+                        className="max-w-[220px] truncate border-b border-[#F1F4F8] px-3 py-2.5 text-[11.5px] font-medium text-slate-600"
                         title={getCellValue(row, column.key)}
                       >
                         {renderCaseCell(row, column)}

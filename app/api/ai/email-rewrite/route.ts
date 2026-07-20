@@ -3,6 +3,9 @@ import {
   type EmailRewriteAction,
   type EmailRewriteContext,
 } from "@/lib/ai-email-assistant";
+import { getCurrentAiUser } from "@/lib/ai-current-user";
+import { AiUsageLimitError, runAiFeature } from "@/lib/ai-feature-runner";
+import { supabase } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -31,10 +34,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await rewriteEmailMessage({
-      rawMessage: body.rawMessage,
-      action,
-      context: body.context || {},
+    const user = await getCurrentAiUser();
+    const caseId = body.context?.case?.id?.trim() || null;
+    const { data: caseItem, error: caseError } = caseId
+      ? await supabase
+          .from("cases")
+          .select("id, case_number, category, area")
+          .eq("id", caseId)
+          .maybeSingle<{ id: string; case_number: string | null; category: string | null; area: string | null }>()
+      : { data: null, error: null };
+    if (caseError || (caseId && !caseItem)) {
+      return Response.json({ ok: false, error: "Caso no encontrado." }, { status: 404 });
+    }
+    const result = await runAiFeature({
+      featureKey: "RESPONSE_TONE_REWRITE",
+      user,
+      caseId,
+      caseNumber: caseItem?.case_number ?? body.context?.case?.case_number ?? null,
+      channel: "TICKET",
+      topic: caseItem?.category ?? caseItem?.area ?? null,
+      requestMetadata: { source: "case_ticket_composer", action },
+      execute: () =>
+        rewriteEmailMessage({
+          rawMessage: body.rawMessage!,
+          action,
+          context: body.context || {},
+        }),
     });
 
     return Response.json({ ok: true, ...result });
@@ -49,7 +74,7 @@ export async function POST(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : "No se pudo mejorar el texto.",
       },
-      { status: 500 },
+      { status: error instanceof AiUsageLimitError ? error.status : 500 },
     );
   }
 }

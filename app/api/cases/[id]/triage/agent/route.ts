@@ -1,13 +1,10 @@
 import { getCurrentAiUser } from "@/lib/ai-current-user";
 import { AiUsageLimitError, runAiFeature } from "@/lib/ai-feature-runner";
-import { generateAgentAiSuggestion } from "@/lib/ai-triage";
+import { runAiTriage } from "@/lib/ai-triage";
 import { supabase } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -26,23 +23,24 @@ export async function POST(
       return Response.json({ ok: false, error: "Caso no encontrado." }, { status: 404 });
     }
     const result = await runAiFeature({
-      featureKey: "WHATSAPP_SUGGESTION",
+      featureKey: "CASE_ANALYSIS",
       user,
       caseId: id,
       caseNumber: caseResult.data.case_number,
-      channel: "WHATSAPP",
+      channel: "CASE",
       topic: caseResult.data.category ?? caseResult.data.area,
-      requestMetadata: { source: "case_whatsapp_composer" },
-      execute: () => generateAgentAiSuggestion(id),
+      requestMetadata: { source: "case_workspace_manual_triage" },
+      execute: async () => {
+        const triage = await runAiTriage(id);
+        if (triage.status === "error") throw new Error(triage.reason || "No se pudo reevaluar el caso con IA.");
+        return triage;
+      },
     });
-    return Response.json({ ok: true, ...result });
+    return Response.json({ ok: true, result });
   } catch (error) {
-    console.error("[api/cases/ai-suggestion] Error generating suggestion", {
-      caseId: id,
-      message: getErrorMessage(error),
-    });
+    const message = error instanceof Error ? error.message : "No se pudo reevaluar el caso con IA.";
     return Response.json(
-      { ok: false, error: getErrorMessage(error) },
+      { ok: false, error: message },
       { status: error instanceof AiUsageLimitError ? error.status : 500 },
     );
   }

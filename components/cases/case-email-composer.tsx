@@ -67,6 +67,7 @@ type EmailComposerSnapshot = CaseEmailComposerState & {
 };
 
 type ComposerCase = {
+  id: string;
   case_number: string | null;
   subject: string | null;
   status: string | null;
@@ -350,6 +351,8 @@ export function CaseEmailComposer({
   const [rewriteWarnings, setRewriteWarnings] = useState<string[]>([]);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
   const [rewriteAction, setRewriteAction] = useState<RewriteAction | null>(null);
+  const [aiDraft, setAiDraft] = useState("");
+  const [isGeneratingAiSuggestion, setIsGeneratingAiSuggestion] = useState(false);
   const htmlEditorRef = useRef<HtmlEmailTemplateEditorHandle | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -398,15 +401,6 @@ export function CaseEmailComposer({
         minute: "2-digit",
       }).format(new Date()),
     [],
-  );
-  const aiDraft = useMemo(
-    () =>
-      resolveVariables(
-        "Hola {{customer.name}},\n\nGracias por contactarnos.\n\nRevisamos tu caso {{case.case_number}} sobre {{case.subject}}. Actualmente estamos validando la información disponible para darte una respuesta clara y segura.\n\nTe notificaremos por este medio apenas tengamos novedades.",
-        caseItem,
-        currentUser,
-      ),
-    [caseItem, currentUser],
   );
   const previewHtml = useMemo(
     () => {
@@ -882,6 +876,7 @@ export function CaseEmailComposer({
               email: getCustomerEmail(caseItem),
             },
             case: {
+              id: caseItem.id,
               case_number: caseItem.case_number,
               subject: caseItem.subject,
               status: caseItem.lifecycle_status || caseItem.status,
@@ -909,6 +904,28 @@ export function CaseEmailComposer({
       setRewriteError(error instanceof Error ? error.message : "No se pudo mejorar el texto.");
     } finally {
       setRewriteAction(null);
+    }
+  }
+
+  async function openAiSuggestion() {
+    if (isGeneratingAiSuggestion) return;
+    setIsGeneratingAiSuggestion(true);
+    setComposerNotice(null);
+    try {
+      const response = await fetch(`/api/cases/${caseItem.id}/ticket-suggestion`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { ok?: boolean; suggestion?: string; error?: string };
+      if (!response.ok || !payload.ok || !payload.suggestion) {
+        throw new Error(payload.error || "No se pudo generar la sugerencia IA Ticket.");
+      }
+      setAiDraft(payload.suggestion);
+      setAiModalTab("suggest");
+      setIsAiModalOpen(true);
+    } catch (error) {
+      setComposerNotice(error instanceof Error ? error.message : "No se pudo generar la sugerencia IA Ticket.");
+    } finally {
+      setIsGeneratingAiSuggestion(false);
     }
   }
 
@@ -1051,11 +1068,12 @@ export function CaseEmailComposer({
 
             <button
               type="button"
-              onClick={() => setIsAiModalOpen(true)}
+              onClick={() => void openAiSuggestion()}
+              disabled={isGeneratingAiSuggestion}
               className="ml-auto inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-3 text-xs font-black text-[var(--g66-brand-blue)] transition hover:bg-[var(--g66-brand-blue-soft)]"
             >
               <Sparkles className="h-4 w-4" aria-hidden="true" />
-              Sugerencia IA
+              {isGeneratingAiSuggestion ? "Generando..." : "Sugerencia IA"}
             </button>
           </div>
 

@@ -1,11 +1,17 @@
-export type CaseResponseStatus = "GREEN" | "YELLOW" | "RED";
+export const caseResponseStatuses = [
+  "NO_AGENT_ACTIVITY",
+  "NO_CUSTOMER_ACTIVITY_24H",
+  "WAITING_AGENT_RESPONSE",
+  "UP_TO_DATE",
+] as const;
+
+export type CaseResponseStatus = (typeof caseResponseStatuses)[number];
 
 export type CaseResponseLabel =
-  | "Al día"
-  | "Sin actividad cliente"
   | "Sin actividad agente"
+  | "Sin actividad cliente"
   | "Esperando respuesta"
-  | "En riesgo";
+  | "Al día";
 
 export type CaseResponseMessage = {
   case_id: string | number | null;
@@ -16,22 +22,26 @@ export type CaseResponseMessage = {
   created_at: string | null;
 };
 
+// Future server-side activity adapters can normalize their events to this
+// contract without coupling the list UI to a persistence provider.
+export type CaseResponseActivityEvent = CaseResponseMessage;
+
 export type CaseResponseActivity = {
   first_customer_message_at: string | null;
   last_customer_message_at: string | null;
   first_agent_message_at: string | null;
   last_agent_message_at: string | null;
-  response_status: Exclude<CaseResponseStatus, "RED">;
-  response_label: Exclude<CaseResponseLabel, "En riesgo">;
+  response_status: CaseResponseStatus;
+  response_label: CaseResponseLabel;
   is_waiting_for_agent: boolean;
   has_agent_interaction: boolean;
 };
 
+const HOUR = 60 * 60 * 1000;
+
 function parseTime(value: string | null | undefined) {
   if (!value) return null;
-
   const time = new Date(value).getTime();
-
   return Number.isNaN(time) ? null : time;
 }
 
@@ -41,7 +51,6 @@ function toIso(value: number | null) {
 
 function isPublicMessage(message: CaseResponseMessage) {
   const messageType = message.message_type?.trim().toUpperCase();
-
   return messageType !== "NOTE" && messageType !== "INTERNAL";
 }
 
@@ -61,65 +70,58 @@ export function isCustomerInboundMessage(message: CaseResponseMessage) {
   );
 }
 
+export function getCaseResponseLabel(status: CaseResponseStatus): CaseResponseLabel {
+  if (status === "NO_AGENT_ACTIVITY") return "Sin actividad agente";
+  if (status === "NO_CUSTOMER_ACTIVITY_24H") return "Sin actividad cliente";
+  if (status === "WAITING_AGENT_RESPONSE") return "Esperando respuesta";
+  return "Al día";
+}
+
+export function isCaseResponseStatus(value: unknown): value is CaseResponseStatus {
+  return caseResponseStatuses.includes(value as CaseResponseStatus);
+}
+
 export function getCaseResponseActivity(
   messages: CaseResponseMessage[],
+  nowDate = new Date(),
+  additionalActivities: CaseResponseActivityEvent[] = [],
 ): CaseResponseActivity {
-  const customerMessages = messages
+  const activities = [...messages, ...additionalActivities];
+  const customerMessages = activities
     .filter(isCustomerInboundMessage)
     .map((message) => parseTime(message.created_at))
     .filter((time): time is number => time !== null)
-    .sort((timeA, timeB) => timeA - timeB);
-  const agentMessages = messages
+    .sort((a, b) => a - b);
+  const agentMessages = activities
     .filter(isAgentOutboundMessage)
     .map((message) => parseTime(message.created_at))
     .filter((time): time is number => time !== null)
-    .sort((timeA, timeB) => timeA - timeB);
+    .sort((a, b) => a - b);
 
-  const firstCustomerMessageAt = customerMessages[0] ?? null;
-  const lastCustomerMessageAt = customerMessages.at(-1) ?? null;
-  const firstAgentMessageAt = agentMessages[0] ?? null;
-  const lastAgentMessageAt = agentMessages.at(-1) ?? null;
-  const hasAgentAfterCustomer =
-    lastCustomerMessageAt !== null &&
-    agentMessages.some((messageTime) => messageTime > lastCustomerMessageAt);
-  const isWaitingForAgent =
-    lastCustomerMessageAt !== null &&
-    (lastAgentMessageAt === null || lastCustomerMessageAt > lastAgentMessageAt);
+  const firstCustomer = customerMessages[0] ?? null;
+  const lastCustomer = customerMessages.at(-1) ?? null;
+  const firstAgent = agentMessages[0] ?? null;
+  const lastAgent = agentMessages.at(-1) ?? null;
+  let responseStatus: CaseResponseStatus;
 
-  if (!firstCustomerMessageAt) {
-    return {
-      first_customer_message_at: null,
-      last_customer_message_at: null,
-      first_agent_message_at: toIso(firstAgentMessageAt),
-      last_agent_message_at: toIso(lastAgentMessageAt),
-      response_status: "GREEN",
-      response_label: "Sin actividad cliente",
-      is_waiting_for_agent: false,
-      has_agent_interaction: firstAgentMessageAt !== null,
-    };
-  }
-
-  if (!firstAgentMessageAt || !hasAgentAfterCustomer) {
-    return {
-      first_customer_message_at: toIso(firstCustomerMessageAt),
-      last_customer_message_at: toIso(lastCustomerMessageAt),
-      first_agent_message_at: toIso(firstAgentMessageAt),
-      last_agent_message_at: toIso(lastAgentMessageAt),
-      response_status: "YELLOW",
-      response_label: firstAgentMessageAt ? "Esperando respuesta" : "Sin actividad agente",
-      is_waiting_for_agent: true,
-      has_agent_interaction: firstAgentMessageAt !== null,
-    };
+  if (lastAgent === null) {
+    responseStatus = "NO_AGENT_ACTIVITY";
+  } else if (lastCustomer !== null && lastCustomer > lastAgent) {
+    responseStatus = "WAITING_AGENT_RESPONSE";
+  } else if (nowDate.getTime() - lastAgent > 24 * HOUR) {
+    responseStatus = "NO_CUSTOMER_ACTIVITY_24H";
+  } else {
+    responseStatus = "UP_TO_DATE";
   }
 
   return {
-    first_customer_message_at: toIso(firstCustomerMessageAt),
-    last_customer_message_at: toIso(lastCustomerMessageAt),
-    first_agent_message_at: toIso(firstAgentMessageAt),
-    last_agent_message_at: toIso(lastAgentMessageAt),
-    response_status: isWaitingForAgent ? "YELLOW" : "GREEN",
-    response_label: isWaitingForAgent ? "Esperando respuesta" : "Al día",
-    is_waiting_for_agent: isWaitingForAgent,
-    has_agent_interaction: true,
+    first_customer_message_at: toIso(firstCustomer),
+    last_customer_message_at: toIso(lastCustomer),
+    first_agent_message_at: toIso(firstAgent),
+    last_agent_message_at: toIso(lastAgent),
+    response_status: responseStatus,
+    response_label: getCaseResponseLabel(responseStatus),
+    is_waiting_for_agent: responseStatus === "WAITING_AGENT_RESPONSE",
+    has_agent_interaction: firstAgent !== null,
   };
 }

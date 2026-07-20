@@ -82,14 +82,9 @@ export function computeCaseSlaStatus(
     activity.is_waiting_for_agent &&
     lastCustomerAt !== null &&
     now - lastCustomerAt > betweenResponsesLimit(input);
-  const breached =
-    first_response_sla_breached || between_responses_sla_breached;
-
   return {
     ...activity,
     first_response_sla_breached,
     between_responses_sla_breached,
-    response_status: breached ? "RED" : activity.response_status,
-    response_label: breached ? "En riesgo" : activity.response_label,
   };
 }

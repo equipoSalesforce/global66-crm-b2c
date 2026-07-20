@@ -1994,11 +1994,8 @@ export function CasesConsole({
       setAiHistoryError(null);
 
       try {
-        const searchParams = new URLSearchParams({
-          crmUserId: agentSession.id,
-        });
         const response = await fetch(
-          `/api/cases/${caseId}/ai-history-summary?${searchParams}`,
+          `/api/cases/${caseId}/ai-history-summary`,
           { cache: "no-store" },
         );
         const payload = (await response.json()) as CaseAiHistoryResponse;
@@ -2037,7 +2034,7 @@ export function CasesConsole({
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ crmUserId: agentSession.id }),
+          body: JSON.stringify({}),
         },
       );
       const payload = (await response.json()) as CaseAiHistoryResponse;

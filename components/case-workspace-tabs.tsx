@@ -540,7 +540,7 @@ function AiTab({
     setIsEvaluating(true);
 
     try {
-      const response = await fetch(`/api/cases/${caseId}/triage`, {
+      const response = await fetch(`/api/cases/${caseId}/triage/agent`, {
         method: "POST",
       });
       const payload = (await response.json()) as {

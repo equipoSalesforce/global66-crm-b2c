@@ -7,6 +7,7 @@ import { getNavigationItems } from "@/lib/permissions";
 import { clearDemoCrmSession } from "@/lib/crm-users";
 import { DemoAvailabilitySelect } from "./demo-availability-select";
 import { Global66Mark } from "./global66-mark";
+import { NotificationBell } from "./notification-bell";
 import { ToastProvider } from "./toast-provider";
 import { useCrmSession } from "./use-crm-session";
 import { useCrmPermissions } from "./use-crm-permissions";
@@ -24,6 +25,7 @@ import {
   MessageCircle,
   Search,
   Settings,
+  ShieldCheck,
   Sparkles,
   UserRoundCheck,
   UsersRound,
@@ -41,6 +43,8 @@ const navigationIconByHref: Record<string, LucideIcon> = {
   "/conversaciones": MessageCircle,
   "/casos?channel=GMAIL": Mail,
   "/logs-ia": Sparkles,
+  "/mi-ia": Sparkles,
+  "/configuracion/ia": ShieldCheck,
   "/sla": BarChart3,
   "/base-conocimiento": BookOpen,
   "/configuracion": Settings,
@@ -439,6 +443,9 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
               >
                 WhatsApp pendientes: {notificationCount}
               </Link>
+            ) : null}
+            {agentId ? (
+              <NotificationBell key={agentId} currentUserId={agentId} />
             ) : null}
             {agentId ? (
               <DemoAvailabilitySelect userId={agentId} compact />
