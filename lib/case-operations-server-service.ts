@@ -266,7 +266,9 @@ export async function changeCasesOwnerInSupabase({
   const { error } = await supabase
     .from("cases")
     .update({
+      owner_type: "USER",
       assigned_agent_id: owner.id,
+      assigned_queue_id: null,
       assigned_to: owner.name,
       assigned_at: now,
       updated_at: now,

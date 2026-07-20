@@ -34,7 +34,7 @@ export default async function CasoExpedientePage({
     supabase
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
       )
       .order("created_at", { ascending: false })
       .returns<CaseRecord[]>(),
@@ -59,7 +59,7 @@ export default async function CasoExpedientePage({
       .returns<CrmCaseFieldPermissionRecord[]>(),
   ]);
 
-  const cases = (casesResult.data ?? [])
+  let cases = (casesResult.data ?? [])
     .filter((caseItem): caseItem is CaseRecord & { id: string | number } =>
       Boolean(caseItem.id),
     )
@@ -67,7 +67,53 @@ export default async function CasoExpedientePage({
       ...caseItem,
       id: String(caseItem.id),
     }));
-  const selectedCase = cases.find((caseItem) => caseItem.id === id);
+  let selectedCase = cases.find((caseItem) => caseItem.id === id);
+
+  if (
+    selectedCase &&
+    (selectedCase.lifecycle_status === "MERGED" || selectedCase.status === "MERGED")
+  ) {
+    const { data: mergeMetadata, error: mergeMetadataError } = await supabase
+      .from("cases")
+      .select("is_merged, merged_into_case_id")
+      .eq("id", selectedCase.id)
+      .maybeSingle<{
+        is_merged: boolean | null;
+        merged_into_case_id: string | null;
+      }>();
+
+    if (mergeMetadataError) {
+      console.warn("[case-detail] Merge metadata is not available", {
+        caseId: selectedCase.id,
+        message: mergeMetadataError.message,
+      });
+    } else if (mergeMetadata) {
+      selectedCase = { ...selectedCase, ...mergeMetadata };
+
+      if (mergeMetadata.merged_into_case_id) {
+        const { data: mergedIntoCase, error: mergedIntoCaseError } = await supabase
+          .from("cases")
+          .select("id, case_number")
+          .eq("id", mergeMetadata.merged_into_case_id)
+          .maybeSingle<{ id: string; case_number: string | null }>();
+
+        if (mergedIntoCaseError) {
+          console.warn("[case-detail] Could not load merged destination case", {
+            caseId: selectedCase.id,
+            mergedIntoCaseId: mergeMetadata.merged_into_case_id,
+            message: mergedIntoCaseError.message,
+          });
+        } else if (mergedIntoCase) {
+          selectedCase = { ...selectedCase, merged_into_case: mergedIntoCase };
+        }
+      }
+
+      const resolvedSelectedCase = selectedCase;
+      cases = cases.map((caseItem) =>
+        caseItem.id === resolvedSelectedCase.id ? resolvedSelectedCase : caseItem,
+      );
+    }
+  }
   const error =
     casesResult.error?.message ??
     messagesResult.error?.message ??

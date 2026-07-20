@@ -277,7 +277,9 @@ export async function assignCaseAutomatically(
     const { error: updateError } = await supabase
       .from("cases")
       .update({
+        owner_type: "USER",
         assigned_agent_id: selectedAgent.id,
+        assigned_queue_id: null,
         assigned_to: selectedAgentName,
         assigned_at: now,
         status: "ASSIGNED",

@@ -202,7 +202,9 @@ export function CaseActions({
       {
         status: "ASSIGNED",
         routing_status: "ASSIGNED",
+        owner_type: "USER",
         assigned_agent_id: assignedAgentId,
+        assigned_queue_id: null,
         assigned_to: selectedAgent?.name ?? selectedAgent?.email ?? null,
         assigned_at: new Date().toISOString(),
       },
@@ -232,7 +234,9 @@ export function CaseActions({
       {
         status: "ASSIGNED",
         routing_status: "ASSIGNED",
+        owner_type: "USER",
         assigned_agent_id: agentId,
+        assigned_queue_id: null,
         assigned_to: agentName || "Agente",
         assigned_at: new Date().toISOString(),
       },
