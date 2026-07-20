@@ -248,6 +248,13 @@ export const navigationItems: NavigationItem[] = [
     roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
   },
   {
+    label: "Dashboards",
+    href: "/dashboards",
+    icon: "DB",
+    permission: "view_dashboard",
+    roles: ["AGENT", "SUPERVISOR", "COMPLIANCE", "ADMIN", "AUDITOR"],
+  },
+  {
     label: "Informes",
     href: "/informes",
     icon: "IF",
@@ -507,6 +514,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   AGENT: [
     "/dashboard",
     "/paneles",
+    "/dashboards",
     "/informes",
     "/casos",
     "/cuentas",
@@ -518,6 +526,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   SUPERVISOR: [
     "/dashboard",
     "/paneles",
+    "/dashboards",
     "/informes",
     "/casos",
     "/cuentas",
@@ -531,6 +540,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   COMPLIANCE: [
     "/dashboard",
     "/paneles",
+    "/dashboards",
     "/informes",
     "/casos",
     "/cuentas",
@@ -544,6 +554,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   ADMIN: [
     "/dashboard",
     "/paneles",
+    "/dashboards",
     "/informes",
     "/casos",
     "/cuentas",
@@ -560,6 +571,7 @@ const menuOrderByRole: Record<AgentRole, string[]> = {
   AUDITOR: [
     "/dashboard",
     "/paneles",
+    "/dashboards",
     "/informes",
     "/casos",
     "/cuentas",
