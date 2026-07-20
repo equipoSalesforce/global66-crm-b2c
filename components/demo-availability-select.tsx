@@ -46,10 +46,12 @@ export function DemoAvailabilitySelect({
   userId,
   compact = false,
   showLabel = true,
+  bare = false,
 }: {
   userId: string;
   compact?: boolean;
   showLabel?: boolean;
+  bare?: boolean;
 }) {
   const key = useMemo(() => storageKey(userId), [userId]);
   const [availability, setAvailability] =
@@ -94,7 +96,7 @@ export function DemoAvailabilitySelect({
 
   return (
     <label
-      className={`inline-flex items-center gap-2 text-xs font-bold ${availabilityClasses[availability]}`}
+      className={`inline-flex items-center gap-1.5 text-xs font-medium ${availabilityClasses[availability]}`}
     >
       {showLabel ? (
         <>
@@ -107,8 +109,12 @@ export function DemoAvailabilitySelect({
         onChange={(event) =>
           updateAvailability(event.target.value as DemoAvailabilityStatus)
         }
-        className={`rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white font-black text-[var(--g66-text-primary)] outline-none focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)] ${
-          compact ? "h-7 px-2 text-xs" : "h-9 px-3 text-sm"
+        className={`font-semibold text-[var(--g66-text-primary)] outline-none ${
+          bare
+            ? "appearance-none bg-transparent pr-4"
+            : "rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
+        } ${
+          compact ? "h-7 px-1.5 text-[12px]" : "h-8 px-2.5 text-[13px]"
         }`}
       >
         {demoAvailabilityStatuses.map((status) => (

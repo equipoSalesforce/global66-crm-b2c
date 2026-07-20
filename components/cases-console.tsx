@@ -31,6 +31,7 @@ import {
   type CaseLayoutTabWithSections,
   type ResolvedCaseAreaLayout,
 } from "@/lib/case-metadata";
+import type { CaseAssignmentResult, CaseOwnerType, DuplicateCaseResult } from "@/lib/case-ownership-types";
 import { normalizeAircallPhone } from "@/lib/aircall";
 import {
   canEditCaseField,
@@ -44,6 +45,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   Bot,
   Check,
@@ -52,12 +54,15 @@ import {
   Copy,
   FileText,
   History,
+  Layers3,
   Mail,
   MessageCircle,
   Paperclip,
   PhoneCall,
   User,
+  UserPlus,
   Wand2,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -74,6 +79,13 @@ import {
 import { CaseReplyForm } from "./case-reply-form";
 import { CaseEmailComposer } from "./cases/case-email-composer";
 import { AircallPhoneWidget } from "./aircall-phone-widget";
+import {
+  CaseAssignmentModal,
+  DuplicateCaseModal,
+  type DuplicateModalCustomField,
+} from "./cases/case-header-action-modals";
+import originalStyles from "./cases/case-detail-original.module.css";
+import { caseDetailManrope, caseDetailMono } from "./cases/case-detail-fonts";
 import { useToast } from "./toast-provider";
 import { useDemoRole } from "./use-demo-role";
 
@@ -91,6 +103,8 @@ export type ConsoleCaseRecord = {
   area: string | null;
   category: string | null;
   assigned_agent_id: string | null;
+  owner_type?: CaseOwnerType | null;
+  assigned_queue_id?: string | null;
   assigned_to: string | null;
   assigned_at?: string | null;
   contact_name: string | null;
@@ -108,6 +122,14 @@ export type ConsoleCaseRecord = {
   product?: string | null;
   subproduct?: string | null;
   is_edge_case?: boolean | null;
+  is_merged?: boolean | null;
+  merged_into_case_id?: string | null;
+  merged_into_case?: {
+    id: string;
+    case_number: string | null;
+  } | null;
+  duplicated_from_case_id?: string | null;
+  owner_queue?: { name: string | null; key: string | null } | null;
   customer: {
     name: string | null;
     email?: string | null;
@@ -115,6 +137,72 @@ export type ConsoleCaseRecord = {
     public_id?: string | null;
   } | null;
 };
+
+async function loadMergedIntoCaseReference(
+  caseItem: Pick<
+    ConsoleCaseRecord,
+    "id" | "lifecycle_status" | "status"
+  >,
+): Promise<
+  Pick<
+    ConsoleCaseRecord,
+    "is_merged" | "merged_into_case_id" | "merged_into_case"
+  >
+> {
+  const isMergedByStatus =
+    caseItem.lifecycle_status === "MERGED" || caseItem.status === "MERGED";
+
+  if (!isMergedByStatus) {
+    return {
+      is_merged: false,
+      merged_into_case_id: null,
+      merged_into_case: null,
+    };
+  }
+
+  const { data: mergeMetadata, error: mergeMetadataError } =
+    await supabaseBrowser
+      .from("cases")
+      .select("is_merged, merged_into_case_id")
+      .eq("id", caseItem.id)
+      .maybeSingle<{
+        is_merged: boolean | null;
+        merged_into_case_id: string | null;
+      }>();
+
+  if (mergeMetadataError || !mergeMetadata?.merged_into_case_id) {
+    if (mergeMetadataError) {
+      console.warn("[cases-console] Merge metadata is not available", {
+        caseId: caseItem.id,
+        message: mergeMetadataError.message,
+      });
+    }
+    return {
+      is_merged: true,
+      merged_into_case_id: null,
+      merged_into_case: null,
+    };
+  }
+
+  const { data, error } = await supabaseBrowser
+    .from("cases")
+    .select("id, case_number")
+    .eq("id", mergeMetadata.merged_into_case_id)
+    .maybeSingle<{ id: string; case_number: string | null }>();
+
+  if (error) {
+    console.warn("[cases-console] Could not load merged destination case", {
+      mergedIntoCaseId: mergeMetadata.merged_into_case_id,
+      message: error.message,
+    });
+  }
+
+  return {
+    is_merged: mergeMetadata.is_merged ?? true,
+    merged_into_case_id: mergeMetadata.merged_into_case_id,
+    merged_into_case: error ? null : data,
+  };
+}
 
 export type ConsoleMessageRecord = {
   id: string | number;
@@ -212,7 +300,6 @@ type TicketTab = "publish" | "details" | "activity" | "history" | `layout:${stri
 type RelatedView = "cases" | "qa" | "email" | "ai" | "history" | "activity" | "sla" | "aircall" | null;
 type PendingAction =
   | "status"
-  | "assign-me"
   | "close"
   | "email"
   | "email-sync"
@@ -390,13 +477,20 @@ const baseViews: { key: ViewKey; label: string }[] = [
   { key: "whatsapp", label: "WhatsApp" },
   { key: "email", label: "Email" },
 ];
-const lifecyclePathLabels: Record<LifecycleStatus, string> = {
+const lifecyclePathStatuses = [
+  "NEW",
+  "IN_PROGRESS",
+  "STAND_BY",
+  "RESOLVED",
+  "CLOSED",
+] as const satisfies readonly LifecycleStatus[];
+type LifecyclePathStatus = (typeof lifecyclePathStatuses)[number];
+const lifecyclePathLabels: Record<LifecyclePathStatus, string> = {
   NEW: "New",
   IN_PROGRESS: "In Progress",
   STAND_BY: "Stand By",
   RESOLVED: "Resolved",
   CLOSED: "Closed",
-  MERGED: "Merged",
 };
 const priorityOptions = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 const areaOptions = [
@@ -504,46 +598,13 @@ function formatAttachmentSize(sizeBytes: number | null | undefined) {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function Badge({
-  children,
-  tone = "gray",
-}: {
-  children: ReactNode;
-  tone?:
-    | "gray"
-    | "navy"
-    | "blue"
-    | "softBlue"
-    | "lightBlue"
-    | "coral"
-    | "green";
-}) {
-  const tones = {
-    gray: "border border-[var(--g66-border)] bg-[var(--g66-background)] text-[var(--g66-text-secondary)]",
-    navy: "bg-[var(--g66-brand-blue)] text-white",
-    blue: "bg-[var(--g66-accent-cyan)] text-white",
-    softBlue: "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-accent-cyan)]",
-    lightBlue: "border border-[var(--g66-border)] bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]",
-    coral: "bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]",
-    green: "bg-[var(--g66-success-soft)] text-[var(--g66-success)]",
-  };
-
-  return (
-    <span
-      className={`inline-flex w-fit rounded-full px-1.5 py-px text-[9px] font-bold ${tones[tone]}`}
-    >
-      {children}
-    </span>
-  );
-}
-
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]">
+      <dt className={`${originalStyles.fieldLabel} uppercase`}>
         {label}
       </dt>
-      <dd className="mt-0.5 break-words text-xs font-bold text-[var(--g66-text-primary)]">
+      <dd className={`${originalStyles.fieldValue} break-words`}>
         {value}
       </dd>
     </div>
@@ -560,15 +621,45 @@ function HeaderMetadataItem({
   className?: string;
 }) {
   return (
-    <div className={`min-w-0 px-3 py-1 first:pl-2 ${className}`}>
-      <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[var(--g66-text-muted)]">
+    <div className={`min-w-0 ${className}`}>
+      <p className={`${originalStyles.metadataItemLabel} uppercase`}>
         {label}
       </p>
-      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] font-black text-[var(--g66-text-primary)]">
+      <div className={`${originalStyles.metadataItemValue} flex min-w-0 items-center`}>
         {children}
       </div>
     </div>
   );
+}
+
+function formatAttentionDuration(seconds: number | null | undefined) {
+  const safeSeconds = Math.max(0, Math.floor(seconds ?? 0));
+  const totalMinutes = Math.floor(safeSeconds / 60);
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${days} ${days === 1 ? "día" : "días"} ${hours} ${hours === 1 ? "hora" : "horas"} ${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
+}
+
+function getHeaderChannelLabel(channel: string | null | undefined) {
+  const normalized = channel?.trim().toUpperCase();
+
+  if (normalized === "WHATSAPP") return "WhatsApp";
+  if (normalized === "GMAIL" || normalized === "EMAIL") return "Email";
+  if (normalized === "AIRCALL" || normalized === "PHONE") return "Teléfono";
+
+  return channel?.trim() || "Sin canal";
+}
+
+function getPriorityLabel(priority: string | null | undefined) {
+  const normalized = priority?.trim().toUpperCase();
+
+  if (normalized === "HIGH" || normalized === "URGENT") return "Alto 🚩";
+  if (normalized === "MEDIUM") return "Medio";
+  if (normalized === "LOW") return "Bajo";
+
+  return priority?.trim() || "Sin prioridad";
 }
 
 function getAuditValueLabel(value: string | null | undefined) {
@@ -1071,11 +1162,11 @@ function ModuleBox({
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
-      <div className="flex items-center justify-between gap-2 border-b border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-2.5 py-1.5">
-        <h3 className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-[var(--g66-text-primary)]">
+    <section className={originalStyles.sideCard}>
+      <div className={`${originalStyles.sideCardHeader} flex items-center justify-between`}>
+        <h3 className={`${originalStyles.sideCardTitle} flex items-center`}>
           {icon ? (
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]">
+            <span className={`${originalStyles.sideCardIcon} flex items-center justify-center bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]`}>
               {icon}
             </span>
           ) : null}
@@ -1083,7 +1174,7 @@ function ModuleBox({
         </h3>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="p-2.5">{children}</div>
+      <div className={originalStyles.sideCardBody}>{children}</div>
     </section>
   );
 }
@@ -1098,21 +1189,21 @@ function QuickCopyRow({
   onCopy: () => void;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-2.5 py-1.5">
+    <div className={`${originalStyles.quickCopyRow} grid grid-cols-[minmax(0,1fr)_auto] items-center`}>
       <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--g66-text-muted)]">
+        <p className={`${originalStyles.quickCopyLabel} uppercase`}>
           {label}
         </p>
-        <p className="truncate text-xs font-bold text-[var(--g66-text-primary)]">{value}</p>
+        <p className={`${originalStyles.quickCopyValue} truncate`}>{value}</p>
       </div>
       <button
         type="button"
         onClick={onCopy}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+        className={`${originalStyles.quickCopyButton} inline-flex items-center justify-center border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]`}
         aria-label={`Copiar ${label}`}
         title={`Copiar ${label}`}
       >
-        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+        <Copy className="h-3 w-3" aria-hidden="true" />
       </button>
     </div>
   );
@@ -1619,37 +1710,6 @@ function MediaAttachmentPreview({
   );
 }
 
-function statusTone(status: string | null) {
-  if (status === "CLOSED") return "gray";
-  if (status === "HUMAN_REQUIRED") return "coral";
-  if (status === "ASSIGNED") return "blue";
-  if (status === "AI_HANDLING") return "softBlue";
-  if (status === "UNASSIGNED") return "gray";
-  if (status === "RESOLVED") return "green";
-  if (status === "IN_PROGRESS") return "blue";
-  if (status === "STAND_BY") return "softBlue";
-  if (status === "NEW") return "gray";
-
-  return "gray";
-}
-
-function routingStatusLabel(status: string | null) {
-  if (status === "AI_HANDLING") return "IA gestionando";
-  if (status === "ASSIGNED") return "Ejecutivo gestionando";
-  if (status === "HUMAN_REQUIRED") return "Requiere humano";
-  if (status === "UNASSIGNED") return "Sin asignar";
-
-  return status || "Sin estado";
-}
-
-function responseBadgeTone(status: CaseNotificationStatus) {
-  if (status === "RED") return "coral";
-  if (status === "BLUE") return "lightBlue";
-  if (status === "NEUTRAL") return "gray";
-
-  return "green";
-}
-
 function whatsappNotificationCardClass(status: CaseNotificationStatus) {
   if (status === "RED") return "border-[var(--g66-danger-soft)] bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]";
   if (status === "BLUE") return "border-[var(--g66-brand-blue-soft)] bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]";
@@ -1780,6 +1840,8 @@ export function CasesConsole({
   const [activeMacros, setActiveMacros] = useState<ActiveMacroRecord[]>([]);
   const [selectedMacroId, setSelectedMacroId] = useState("");
   const [isMacroModalOpen, setIsMacroModalOpen] = useState(false);
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [whatsappNotificationCases, setWhatsappNotificationCases] = useState<
     WhatsappNotificationCase[]
   >([]);
@@ -2319,7 +2381,7 @@ export function CasesConsole({
       const { data, error } = await supabaseBrowser
         .from("cases")
         .select(
-          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
         )
         .eq("id", selectedCaseId)
         .single<ConsoleCaseRecord>();
@@ -2335,9 +2397,14 @@ export function CasesConsole({
         return;
       }
 
+      const mergedContext = await loadMergedIntoCaseReference(data);
+      if (!isMounted) return;
+
       setCaseItems((currentCases) =>
         currentCases.map((caseItem) =>
-          caseItem.id === selectedCaseId ? { ...caseItem, ...data } : caseItem,
+          caseItem.id === selectedCaseId
+            ? { ...caseItem, ...data, ...mergedContext }
+            : caseItem,
         ),
       );
     }
@@ -2716,6 +2783,16 @@ export function CasesConsole({
   const selectedLifecycleStatus = selectedCase
     ? normalizeLifecycleStatus(selectedCase.lifecycle_status, selectedCase.status)
     : "NEW";
+  const selectedCaseIsMerged = Boolean(
+    selectedCase?.is_merged || selectedLifecycleStatus === "MERGED",
+  );
+  const selectedLifecyclePathStatus: LifecyclePathStatus =
+    selectedCaseIsMerged || selectedLifecycleStatus === "MERGED"
+      ? "CLOSED"
+      : selectedLifecycleStatus;
+  const selectedLifecyclePathIndex = lifecyclePathStatuses.indexOf(
+    selectedLifecyclePathStatus,
+  );
   const selectedRoutingStatus = selectedCase
     ? normalizeRoutingStatus({
         routingStatus: selectedCase.routing_status,
@@ -2723,16 +2800,38 @@ export function CasesConsole({
         assignedAgentId: selectedCase.assigned_agent_id,
       })
     : "UNASSIGNED";
+  const selectedCaseNumberLabel = selectedCase
+    ? formatCaseNumber(selectedCase.case_number, selectedCase.id).replace(/^Caso\s*/i, "")
+    : "";
+  const selectedChannelLabel = selectedCase
+    ? getHeaderChannelLabel(selectedCase.channel || selectedCase.contact_type)
+    : "Sin canal";
   const workAreaGridClass =
     isQueueOpen && isRightPanelOpen
-      ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[230px_280px_minmax(0,1fr)_310px]"
+      ? `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[230px_259.2px_minmax(0,1fr)_259.2px]`
       : isQueueOpen
-        ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[230px_280px_minmax(0,1fr)_30px]"
+        ? `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[230px_259.2px_minmax(0,1fr)_27px]`
         : isRightPanelOpen
-          ? "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[280px_minmax(0,1fr)_310px]"
-          : "grid min-h-0 flex-1 items-stretch overflow-hidden gap-2 p-2 xl:grid-cols-[280px_minmax(0,1fr)_30px]";
+          ? `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[259.2px_minmax(0,1fr)_259.2px]`
+          : `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[259.2px_minmax(0,1fr)_27px]`;
   const selectedMacro =
     activeMacros.find((macro) => macro.id === selectedMacroId) ?? null;
+
+  useEffect(() => {
+    if (!selectedCase) return;
+
+    const detail = { caseNumber: selectedCaseNumberLabel };
+    const publishHeaderContext = () => {
+      window.dispatchEvent(new CustomEvent("case-header-context", { detail }));
+    };
+
+    window.addEventListener("request-case-header-context", publishHeaderContext);
+    publishHeaderContext();
+
+    return () => {
+      window.removeEventListener("request-case-header-context", publishHeaderContext);
+    };
+  }, [selectedCase, selectedCaseNumberLabel]);
 
   useEffect(() => {
     if (workTab !== "whatsapp") return;
@@ -3006,7 +3105,7 @@ export function CasesConsole({
     const { data, error } = await supabaseBrowser
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, assigned_to, assigned_at, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id)",
+        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
       )
       .eq("id", caseId)
       .single<ConsoleCaseRecord>();
@@ -3015,7 +3114,8 @@ export function CasesConsole({
       throw new Error(error?.message || "No se pudo refrescar el caso.");
     }
 
-    updateLocalCase(caseId, data);
+    const mergedContext = await loadMergedIntoCaseReference(data);
+    updateLocalCase(caseId, { ...data, ...mergedContext });
   }
 
   async function startAircallCall(caseItem: ConsoleCaseRecord) {
@@ -3227,28 +3327,34 @@ export function CasesConsole({
     setPendingAction(null);
   }
 
-  async function assignToMe() {
-    if (!selectedCase || !canTakeCases || !agentSession.id || pendingAction) {
-      return;
+  function handleCaseAssigned(assignment: CaseAssignmentResult) {
+    updateLocalCase(assignment.id, {
+      owner_type: assignment.ownerType,
+      assigned_agent_id: assignment.assignedAgentId,
+      assigned_queue_id: assignment.assignedQueueId,
+      assigned_to: assignment.assignedTo,
+      owner_queue: assignment.ownerType === "QUEUE"
+        ? { name: assignment.owner.name, key: assignment.owner.key ?? null }
+        : null,
+      status: "ASSIGNED",
+      routing_status: "ASSIGNED",
+      assigned_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    setIsAssignmentModalOpen(false);
+    toast.success("✓ Caso asignado correctamente");
+    if (assignment.notificationStatus === "failed") {
+      toast.info("El caso fue asignado, pero no se pudo crear la notificación.");
     }
+    void refreshCaseAuditEvents(assignment.id);
+    window.dispatchEvent(new CustomEvent("case-whatsapp-notifications-refresh"));
+  }
 
-    setPendingAction("assign-me");
-    const assignedAt = new Date().toISOString();
-    await updateCase(
-      {
-        status: "ASSIGNED",
-        lifecycle_status: normalizeLifecycleStatus(
-          selectedCase.lifecycle_status,
-          selectedCase.status,
-        ),
-        routing_status: "ASSIGNED",
-        assigned_agent_id: agentSession.id,
-        assigned_to: agentSession.name,
-        assigned_at: assignedAt,
-      },
-      "✓ Caso asignado correctamente",
-    );
-    setPendingAction(null);
+  function handleCaseDuplicated(result: DuplicateCaseResult) {
+    setIsDuplicateModalOpen(false);
+    toast.success("Caso duplicado correctamente");
+    router.push(result.url);
+    router.refresh();
   }
 
   async function closeCase() {
@@ -3313,7 +3419,9 @@ export function CasesConsole({
     }
     if (formData.has("assigned_agent_id")) {
       const assignedAgentId = String(formData.get("assigned_agent_id") || "");
+      values.owner_type = "USER";
       values.assigned_agent_id = assignedAgentId || null;
+      values.assigned_queue_id = null;
       values.assigned_to =
         agentNames.get(assignedAgentId) || selectedCase.assigned_to;
       if (assignedAgentId && assignedAgentId !== selectedCase.assigned_agent_id) {
@@ -3402,7 +3510,9 @@ export function CasesConsole({
       values.contact_type = String(formData.get("contact_type") || "") || null;
     }
     if (canEditCaseInfoField("assigned_agent_id")) {
+      values.owner_type = "USER";
       values.assigned_agent_id = assignedAgentId || null;
+      values.assigned_queue_id = null;
       values.assigned_to = assignedAgentId
         ? agentNames.get(assignedAgentId) || null
         : null;
@@ -3679,13 +3789,34 @@ export function CasesConsole({
     }
   }
 
+  const duplicateCustomFields: DuplicateModalCustomField[] = areaLayoutTab
+    ? areaLayoutTab.sections.flatMap((section) =>
+        section.fields.flatMap((layoutField) => {
+          const field = layoutField.field_definition;
+          if (!field || field.is_standard) return [];
+
+          return [
+            {
+              field,
+              value: getCustomValueForField(
+                field,
+                customValues.find(
+                  (customValue) => customValue.field_definition_id === field.id,
+                ),
+              ),
+            },
+          ];
+        }),
+      )
+    : [];
+
   return (
-    <section className="relative flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden bg-[linear-gradient(135deg,var(--g66-background)_0%,var(--g66-background-soft)_100%)] text-[var(--g66-text-primary)]">
+    <section className={`${caseDetailManrope.variable} ${caseDetailMono.variable} ${originalStyles.detailRoot} relative flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden text-[var(--g66-text-primary)]`}>
       {selectedCase ? (
-        <header className="mx-2 mt-2 flex h-auto min-h-[92px] shrink-0 flex-col items-stretch justify-between gap-2 rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white/95 px-3 py-1.5 shadow-[var(--g66-shadow-card)] backdrop-blur lg:h-[92px] lg:flex-row">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--g66-brand-blue)] text-[10px] font-black text-white shadow-[0_6px_16px_rgb(32_94_241/0.2)]">
+        <header className={`${originalStyles.caseHeader} shrink-0 bg-white`}>
+          <div className={`${originalStyles.caseHeaderTop} flex flex-col xl:flex-row xl:items-center xl:justify-between`}>
+            <div className={`${originalStyles.caseIdentity} flex min-w-0 flex-wrap items-center`}>
+              <div className={`${originalStyles.caseAvatar} flex shrink-0 items-center justify-center bg-[var(--g66-brand-blue)] text-white`}>
                 {getCustomerLabel(selectedCase)
                   .split(" ")
                   .map((part) => part[0])
@@ -3693,62 +3824,92 @@ export function CasesConsole({
                   .slice(0, 2)
                   .toUpperCase()}
               </div>
-              <div className="min-w-[150px]">
-                <h1 className="truncate text-lg font-black leading-5 tracking-tight text-[var(--g66-text-primary)]">
-                  {formatCaseNumber(selectedCase.case_number, selectedCase.id).replace(
-                    /^Caso\s*/i,
-                    "",
-                  )}
-                </h1>
-                <p className="truncate text-[10px] font-semibold text-[var(--g66-text-secondary)]">
-                  {getCustomerLabel(selectedCase)}
-                </p>
-              </div>
-              <Badge tone={statusTone(selectedRoutingStatus)}>
-                {routingStatusLabel(selectedRoutingStatus)}
-              </Badge>
-              {(selectedCase.channel || selectedCase.contact_type)?.toUpperCase() ===
-              "WHATSAPP" ? (
-                <Badge tone="green">
-                  <span className="inline-flex items-center gap-1">
-                    <MessageCircle className="h-3 w-3" aria-hidden="true" />
-                    WhatsApp
-                  </span>
-                </Badge>
+              <h1 className={`${originalStyles.caseNumber} truncate font-mono`}>
+                {selectedCaseNumberLabel}
+              </h1>
+              <span className={`${originalStyles.headerBadge} ${originalStyles.channelBadge} inline-flex items-center`}>
+                <span className={`${originalStyles.headerBadgeLabel} uppercase opacity-80`}>Canal</span>
+                <span className={`h-2 w-2 rounded-full ${selectedChannelLabel === "WhatsApp" ? "bg-[#16c75d]" : "bg-[var(--g66-brand-blue)]"}`} aria-hidden="true" />
+                {selectedChannelLabel}
+              </span>
+              <span className={`${originalStyles.headerBadge} ${originalStyles.attentionBadge} inline-flex items-center`}>
+                <span className={`${originalStyles.headerBadgeLabel} uppercase text-[var(--g66-text-muted)]`}>Tiempo atención</span>
+                {formatAttentionDuration(selectedCaseSla?.ahtTotalSeconds)}
+              </span>
+            </div>
+
+            <div className={`${originalStyles.headerActions} flex shrink-0 flex-wrap items-center`}>
+              <Link
+                href="/casos"
+                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)]`}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                Volver a listado
+              </Link>
+              {canExecuteMacros ? (
+                <button
+                  type="button"
+                  disabled={pendingAction !== null}
+                  onClick={openMacroModal}
+                  className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-brand-blue)]/20 bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]`}
+                >
+                  <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Ejecutar macro
+                </button>
               ) : null}
-              {selectedCaseSla ? (
-                <>
-                  <Badge tone={responseBadgeTone(selectedCaseSla.notificationStatus)}>
-                    {selectedCaseSla.notificationStatus === "RED"
-                      ? "Sin respuesta"
-                      : selectedCaseSla.notificationLabel}
-                  </Badge>
-                  <Badge tone="gray">
-                    {selectedCaseSla.firstAgentResponseAt
-                      ? `FRT: ${formatDuration(selectedCaseSla.frtSeconds)}`
-                      : `FRT pendiente: ${formatDuration(selectedCaseSla.frtSeconds)}`}
-                  </Badge>
-                </>
-              ) : null}
-              {attachmentItems.length > 0 ? (
-                <Badge tone="lightBlue">
-                  <span className="inline-flex items-center gap-1">
-                    <Paperclip className="h-3 w-3" aria-hidden="true" />
-                    Adjuntos: {attachmentItems.length}
-                  </span>
-                </Badge>
+              <button
+                type="button"
+                disabled={!canTakeCases || pendingAction !== null}
+                onClick={() => setIsAssignmentModalOpen(true)}
+                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-muted)]`}
+              >
+                <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                Asignar
+              </button>
+              <button
+                type="button"
+                disabled={pendingAction !== null}
+                onClick={() => setIsDuplicateModalOpen(true)}
+                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)]`}
+              >
+                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                Duplicar
+              </button>
+              {canCloseCases ? (
+                <button
+                  type="button"
+                  disabled={pendingAction !== null}
+                  onClick={closeCase}
+                  className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[#f4c6cf] bg-[var(--g66-danger-soft)] text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]`}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  {pendingAction === "close" ? "Cerrando..." : "Cerrar"}
+                </button>
               ) : null}
             </div>
-            <div className="mt-1 grid max-w-4xl grid-cols-2 divide-x divide-[var(--g66-border-soft)] rounded-[var(--g66-radius-md)] border border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] sm:grid-cols-3 lg:grid-cols-[1.25fr_0.8fr_1fr_0.85fr_0.7fr]">
+          </div>
+
+          <div className={`${originalStyles.headerMetadata} flex flex-wrap items-start border-t`}>
               <HeaderMetadataItem label="Case Owner">
-                <span className="truncate">{getAgentLabel(selectedCase, agentNames)}</span>
-                {canEditAnyCaseInfoField ? (
+                {selectedCase.owner_type === "QUEUE" ? (
+                  <Layers3 className="h-3.5 w-3.5 shrink-0 text-[var(--g66-brand-blue)]" aria-hidden="true" />
+                ) : null}
+                <span className="truncate">
+                  {selectedCase.owner_type === "QUEUE"
+                    ? selectedCase.owner_queue?.name || selectedCase.assigned_to || "Sin owner"
+                    : getAgentLabel(selectedCase, agentNames) === "Sin asignar"
+                      ? "Sin owner"
+                      : getAgentLabel(selectedCase, agentNames)}
+                </span>
+                {canTakeCases ? (
                   <button
                     type="button"
-                    onClick={() => setIsCaseInfoEditing(true)}
-                    className="shrink-0 rounded border border-[var(--g66-border)] bg-white px-1.5 py-0.5 text-[9px] font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                    onClick={() => setIsAssignmentModalOpen(true)}
+                    aria-label="Cambiar case owner"
+                    title="Cambiar case owner"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--g66-border)] bg-white text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                   >
-                    Cambiar
+                    <UserPlus className="h-3 w-3" aria-hidden="true" />
                   </button>
                 ) : null}
               </HeaderMetadataItem>
@@ -3765,77 +3926,27 @@ export function CasesConsole({
                 <span
                   className={
                     selectedDaysWithoutOperation && selectedDaysWithoutOperation > 0
-                      ? "rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-700"
+                      ? "text-amber-600"
                       : ""
                   }
                 >
                   {selectedDaysWithoutOperation === null
-                    ? "Sin actividad"
-                    : `${selectedDaysWithoutOperation} d`}
+                    ? "—"
+                    : selectedDaysWithoutOperation}
                 </span>
               </HeaderMetadataItem>
               <HeaderMetadataItem label="Prioridad">
                 <span
-                  className={`inline-flex items-center gap-1 ${
+                  className={
                     selectedCase.priority?.toUpperCase() === "HIGH" ||
                     selectedCase.priority?.toUpperCase() === "URGENT"
                       ? "text-[var(--g66-danger)]"
                       : ""
-                  }`}
+                  }
                 >
-                  {selectedCase.priority?.toUpperCase() === "HIGH" ||
-                  selectedCase.priority?.toUpperCase() === "URGENT" ? (
-                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                  ) : null}
-                  {selectedCase.priority || "Sin prioridad"}
+                  {getPriorityLabel(selectedCase.priority)}
                 </span>
               </HeaderMetadataItem>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-wrap items-start gap-1.5">
-            <Link
-              href="/casos"
-              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
-            >
-              Volver a listado
-            </Link>
-            {canExecuteMacros ? (
-              <button
-                type="button"
-                disabled={pendingAction !== null}
-                onClick={openMacroModal}
-                className="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
-              >
-                <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Ejecutar macro
-              </button>
-            ) : null}
-            <button
-              type="button"
-              disabled={!canTakeCases || pendingAction !== null}
-              onClick={assignToMe}
-              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-secondary)]"
-            >
-              {pendingAction === "assign-me" ? "Asignando..." : "Asignar"}
-            </button>
-            <button
-              type="button"
-              onClick={() => toast.info("ℹ Acción completada")}
-              className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
-            >
-              Duplicar
-            </button>
-            {canCloseCases ? (
-              <button
-                type="button"
-                disabled={pendingAction !== null}
-                onClick={closeCase}
-                className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--g66-radius-md)] border border-[var(--g66-danger-soft)] bg-[var(--g66-danger-soft)] px-2.5 text-[11px] font-bold text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]"
-              >
-                {pendingAction === "close" ? "Cerrando..." : "Cerrar"}
-              </button>
-            ) : null}
           </div>
         </header>
       ) : null}
@@ -4004,17 +4115,17 @@ export function CasesConsole({
         ) : null}
 
         {selectedCase ? (
-          <aside className="h-full min-h-0 overflow-y-auto border-r border-[var(--g66-border)] bg-[var(--g66-background)] p-2">
+          <aside className={`${originalStyles.sideColumn} h-full min-h-0 overflow-y-auto`}>
             {!isQueueOpen ? (
               <button
                 type="button"
                 onClick={() => setIsQueueOpen(true)}
-                className="mb-3 flex h-8 w-full items-center justify-center rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white text-xs font-bold text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+                className={`${originalStyles.showQueueButton} flex w-full items-center justify-center bg-white hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]`}
               >
                 &gt; Mostrar cola
               </button>
             ) : null}
-            <div className="grid gap-2">
+            <div className={`${originalStyles.sideStack} grid`}>
               <ModuleBox
                 title="Información del cliente"
                 icon={<User className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -4022,13 +4133,13 @@ export function CasesConsole({
                   selectedCase.customer?.public_id ? (
                     <Link
                       href={`/cuentas/${selectedCase.customer.public_id}`}
-                      className="inline-flex items-center gap-1 rounded-full border border-[var(--g66-border)] bg-white px-2 py-1 text-[10px] font-black text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                      className="inline-flex items-center gap-1 rounded-full border border-[var(--g66-border)] bg-white px-2 py-0.5 text-[9px] font-semibold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       Cliente 360
                       <ArrowRight className="h-3 w-3" aria-hidden="true" />
                     </Link>
                   ) : (
-                    <span className="rounded-full bg-[var(--g66-background)] px-2 py-1 text-[10px] font-black text-[var(--g66-text-muted)]">
+                    <span className="rounded-full bg-[var(--g66-background)] px-2 py-0.5 text-[9px] font-semibold text-[var(--g66-text-muted)]">
                       Cliente no vinculado
                     </span>
                   )
@@ -4044,7 +4155,7 @@ export function CasesConsole({
                     type="button"
                     onClick={() => startAircallCall(selectedCase)}
                     disabled={pendingAction !== null}
-                    className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-3 text-xs font-black text-white transition hover:bg-[var(--g66-brand-blue-hover)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)] disabled:text-[var(--g66-text-muted)]"
+                    className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-3 text-[11px] font-semibold text-white transition hover:bg-[var(--g66-brand-blue-hover)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)] disabled:text-[var(--g66-text-muted)]"
                   >
                     <PhoneCall className="h-3.5 w-3.5" aria-hidden="true" />
                     {pendingAction === "aircall" ? "Preparando..." : "Llamar"}
@@ -4071,7 +4182,7 @@ export function CasesConsole({
                     <button
                       type="button"
                       onClick={() => setIsCaseInfoEditing((current) => !current)}
-                      className="inline-flex items-center rounded-full border border-[var(--g66-border)] bg-white px-2 py-1 text-[10px] font-black text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                      className="inline-flex items-center rounded-full border border-[var(--g66-border)] bg-white px-2 py-0.5 text-[9px] font-semibold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       {isCaseInfoEditing ? "Cancelar" : "Editar"}
                     </button>
@@ -4301,7 +4412,7 @@ export function CasesConsole({
                 title="CSAT"
                 icon={<CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-xs font-semibold text-[var(--g66-text-secondary)]">
+                <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-2 text-[11px] font-normal leading-4 text-[var(--g66-text-secondary)]">
                   No hay resultados de CSAT asociados a este caso.
                 </p>
               </ModuleBox>
@@ -4309,29 +4420,83 @@ export function CasesConsole({
           </aside>
         ) : null}
 
-        <main className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
+        <main className={`${originalStyles.centerColumn} flex h-full min-h-0 flex-col overflow-hidden bg-transparent`}>
           {selectedCase ? (
             <>
-              <section className="shrink-0 rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white px-3 py-1.5 shadow-[var(--g66-shadow-card)]">
-                <div className="flex min-h-12 items-center">
+              <section className={`${originalStyles.stepperCard} shrink-0 bg-white`}>
+                {selectedCaseIsMerged ? (
+                  <div className={`${originalStyles.mergedNotice} flex flex-wrap items-center justify-end gap-2 border-b border-[var(--g66-border-soft)]`}>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--g66-surface-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--g66-text-secondary)]">
+                      <Layers3 className="h-3 w-3" aria-hidden="true" />
+                      Caso combinado
+                    </span>
+                    {selectedCase.merged_into_case_id ? (
+                      <Link
+                        href={`/casos/${selectedCase.merged_into_case_id}`}
+                        className="text-[9px] font-medium text-[var(--g66-brand-blue)] hover:underline"
+                      >
+                        Fusionado en{
+                          selectedCase.merged_into_case?.case_number
+                            ? ` #${String(selectedCase.merged_into_case.case_number).padStart(6, "0")}`
+                            : " el caso destino"
+                        }
+                      </Link>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className={`${originalStyles.stepperTrack} flex items-start`}>
                   <div className="flex w-full items-start">
-                    {lifecycleStatuses.map((status, index) => {
-                      const isActive = selectedLifecycleStatus === status;
-                      const isPast =
-                        lifecycleStatuses.indexOf(selectedLifecycleStatus) > index;
-                      const isLineComplete =
-                        lifecycleStatuses.indexOf(selectedLifecycleStatus) > index;
+                    {lifecyclePathStatuses.map((status, index) => {
+                      const isActive = selectedLifecyclePathStatus === status;
+                      const isPast = selectedLifecyclePathIndex > index;
+                      const isLineComplete = selectedLifecyclePathIndex > index;
                       const canClick =
                         canEditCaseFields && pendingAction !== "status";
 
                       return (
                         <div
                           key={status}
-                          className="relative flex min-w-0 flex-1 flex-col items-center"
+                          className="contents"
                         >
-                          {index < lifecycleStatuses.length - 1 ? (
+                          <div className={`${originalStyles.stepperStep} flex shrink-0 flex-col items-center`}>
+                            <button
+                              type="button"
+                              disabled={!canClick}
+                              onClick={() => changeLifecycleStatus(status)}
+                              title={status}
+                              className={`${originalStyles.stepperButton} relative z-10 flex min-w-0 flex-col items-center disabled:cursor-not-allowed`}
+                            >
+                              <span
+                                className={`${originalStyles.stepperCircle} flex items-center justify-center rounded-full border transition ${
+                                  isActive
+                                    ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue)] text-white shadow-[0_8px_18px_rgb(32_94_241/0.2)]"
+                                    : isPast
+                                      ? "border-[var(--g66-success)] bg-[var(--g66-success)] text-white"
+                                      : "border-[var(--g66-border)] bg-white text-[var(--g66-text-muted)]"
+                                }`}
+                              >
+                                {isPast ? (
+                                  <Check aria-hidden="true" />
+                                ) : (
+                                  index + 1
+                                )}
+                              </span>
+                              <span
+                                className={`${originalStyles.stepperLabel} truncate ${
+                                  isActive
+                                    ? "font-extrabold text-[var(--g66-brand-blue)]"
+                                    : isPast
+                                      ? "text-[var(--g66-success)]"
+                                      : "text-[var(--g66-text-muted)]"
+                                }`}
+                              >
+                                {lifecyclePathLabels[status]}
+                              </span>
+                            </button>
+                          </div>
+                          {index < lifecyclePathStatuses.length - 1 ? (
                             <span
-                              className={`absolute left-[calc(50%+22px)] right-[calc(-50%+22px)] top-3 h-0.5 rounded-full ${
+                              className={`${originalStyles.stepperLine} rounded-full ${
                                 isLineComplete
                                   ? "bg-[var(--g66-brand-blue)]"
                                   : "bg-[var(--g66-border)]"
@@ -4339,40 +4504,6 @@ export function CasesConsole({
                               aria-hidden="true"
                             />
                           ) : null}
-                          <button
-                            type="button"
-                            disabled={!canClick}
-                            onClick={() => changeLifecycleStatus(status)}
-                            title={status}
-                            className="relative z-10 flex min-w-0 flex-col items-center gap-1.5 disabled:cursor-not-allowed"
-                          >
-                            <span
-                              className={`flex h-8 w-8 items-center justify-center rounded-full border text-xs font-black transition ${
-                                isActive
-                                  ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue)] text-white shadow-[0_8px_18px_rgb(32_94_241/0.2)]"
-                                  : isPast
-                                    ? "border-[var(--g66-success-soft)] bg-[var(--g66-success-soft)] text-[var(--g66-success)]"
-                                    : "border-[var(--g66-border-soft)] bg-[#F3F7FC] text-[var(--g66-text-muted)]"
-                              }`}
-                            >
-                              {isPast ? (
-                                <Check className="h-4 w-4" aria-hidden="true" />
-                              ) : (
-                                index + 1
-                              )}
-                            </span>
-                            <span
-                              className={`truncate text-[11px] font-bold ${
-                                isActive
-                                  ? "text-[var(--g66-brand-blue)]"
-                                  : isPast
-                                    ? "text-[var(--g66-success)]"
-                                    : "text-[var(--g66-text-muted)]"
-                              }`}
-                            >
-                              {lifecyclePathLabels[status]}
-                            </span>
-                          </button>
                         </div>
                       );
                     })}
@@ -4380,42 +4511,42 @@ export function CasesConsole({
                 </div>
               </section>
 
-              <section className="mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-card)]">
-                <div className="flex h-10 shrink-0 items-end border-b border-[var(--g66-border-soft)] bg-white px-3">
+              <section className={`${originalStyles.conversationCard} flex min-h-0 flex-1 flex-col overflow-hidden bg-white`}>
+                <div className={`${originalStyles.tabsBar} flex shrink-0 border-b bg-white`}>
                   {[
                     {
                       key: "whatsapp",
                       label: "WhatsApp",
-                      icon: <MessageCircle className="h-4 w-4" aria-hidden="true" />,
+                      icon: <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     {
                       key: "ticket",
                       label: "Ticket",
-                      icon: <Mail className="h-4 w-4" aria-hidden="true" />,
+                      icon: <Mail className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     ...(canViewAiCaseSummary
                       ? [
                           {
                             key: "ai",
                             label: "IA",
-                            icon: <Bot className="h-4 w-4" aria-hidden="true" />,
+                            icon: <Bot className="h-3.5 w-3.5" aria-hidden="true" />,
                           },
                         ]
                       : []),
                     {
                       key: "activity",
                       label: "Actividad",
-                      icon: <Activity className="h-4 w-4" aria-hidden="true" />,
+                      icon: <Activity className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     {
                       key: "history",
                       label: "Historial",
-                      icon: <History className="h-4 w-4" aria-hidden="true" />,
+                      icon: <History className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     {
                       key: "form",
                       label: "Form",
-                      icon: <FileText className="h-4 w-4" aria-hidden="true" />,
+                      icon: <FileText className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                   ].map((tab) => {
                     const key = tab.key as WorkTab;
@@ -4426,7 +4557,7 @@ export function CasesConsole({
                         key={key}
                         type="button"
                         onClick={() => setWorkTab(key)}
-                        className={`flex h-8 items-center gap-1.5 border-b-2 px-3 text-xs font-black transition ${
+                        className={`${originalStyles.tabButton} flex items-center border-b-2 transition ${
                           isActive
                             ? key === "whatsapp"
                               ? "border-[var(--g66-success)] text-[var(--g66-success)]"
@@ -4970,17 +5101,17 @@ export function CasesConsole({
           )}
         </main>
 
-        <aside className="h-full min-h-0 overflow-y-auto border-l border-[var(--g66-border)] bg-[var(--g66-background)] p-2">
-          <div className="mb-3 flex h-8 items-center justify-between">
+        <aside className={`${originalStyles.sideColumn} h-full min-h-0 overflow-y-auto`}>
+          <div className={`${originalStyles.relatedHeader} flex items-center justify-between`}>
             {isRightPanelOpen ? (
               <>
-                <span className="text-xs font-bold uppercase tracking-wide text-[var(--g66-text-secondary)]">
+                <span className={`${originalStyles.relatedTitle} uppercase`}>
                   Relacionados
                 </span>
                 <button
                   type="button"
                   onClick={() => setIsRightPanelOpen(false)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-xs font-bold text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+                  className={`${originalStyles.relatedToggle} flex items-center justify-center border border-[var(--g66-border)] bg-white text-[11px] font-medium text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]`}
                   aria-label="Ocultar panel derecho"
                   title="Ocultar panel derecho"
                 >
@@ -4991,7 +5122,7 @@ export function CasesConsole({
               <button
                 type="button"
                 onClick={() => setIsRightPanelOpen(true)}
-                className="mx-auto flex h-7 w-7 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-xs font-bold text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+                className="mx-auto flex h-6 w-6 items-center justify-center rounded-md border border-[var(--g66-border)] bg-white text-[11px] font-medium text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
                 aria-label="Mostrar panel derecho"
                 title="Mostrar panel derecho"
               >
@@ -5001,7 +5132,7 @@ export function CasesConsole({
           </div>
 
           {selectedCase && isRightPanelOpen ? (
-            <div className="grid gap-2">
+            <div className={`${originalStyles.sideStack} grid`}>
               <ModuleBox
                 title={`Casos WhatsApp${
                   whatsappPendingCount > 0 ? ` · ${whatsappPendingCount}` : ""
@@ -5014,7 +5145,7 @@ export function CasesConsole({
                       <Link
                         key={caseItem.caseId}
                         href={`/casos/${caseItem.caseId}`}
-                        className={`block rounded-[var(--g66-radius-md)] border p-3 transition hover:-translate-y-0.5 hover:shadow-[var(--g66-shadow-card)] ${whatsappNotificationCardClass(
+                        className={`block rounded-[var(--g66-radius-md)] border p-2.5 transition hover:-translate-y-0.5 hover:shadow-[var(--g66-shadow-card)] ${whatsappNotificationCardClass(
                           caseItem.notificationStatus,
                         )}`}
                       >
@@ -5025,20 +5156,20 @@ export function CasesConsole({
                                 status={caseItem.notificationStatus}
                               />
                             </span>
-                            <span className="truncate text-xs font-bold">
+                            <span className="truncate text-[11px] font-semibold">
                               {caseItem.caseNumber}
                             </span>
                           </span>
-                          <span className="shrink-0 text-[11px] font-bold">
+                          <span className="shrink-0 text-[10px] font-semibold">
                             WA
                           </span>
                         </div>
-                        <p className="mt-1 truncate text-[11px] font-semibold">
+                        <p className="mt-1 truncate text-[10px] font-medium">
                           {caseItem.notificationStatus === "RED"
                             ? "Sin primera respuesta"
                             : caseItem.notificationLabel}
                         </p>
-                        <p className="mt-1 truncate text-[11px] font-semibold opacity-80">
+                        <p className="mt-1 truncate text-[10px] font-medium opacity-80">
                           Última actividad:{" "}
                           {formatRelativeTime(
                             caseItem.lastActivityAt || caseItem.createdAt,
@@ -5048,7 +5179,7 @@ export function CasesConsole({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs font-semibold text-[var(--g66-text-secondary)]">
+                  <p className="text-[11px] font-normal leading-4 text-[var(--g66-text-secondary)]">
                     No hay casos WhatsApp abiertos asignados a tu sesión.
                   </p>
                 )}
@@ -5115,7 +5246,7 @@ export function CasesConsole({
                       onClick={() =>
                         setRelatedView(item.key as Exclude<RelatedView, null>)
                       }
-                      className="flex h-8 items-center justify-between rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2.5 text-[11px] font-bold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                      className="flex h-7 items-center justify-between rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2 text-[10px] font-semibold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       <span className="flex items-center gap-1.5">
                         {item.icon}
@@ -5134,7 +5265,7 @@ export function CasesConsole({
                   {caseItems
                     .filter((caseItem) => selectedCase.customer_id && caseItem.customer_id === selectedCase.customer_id)
                     .map((caseItem) => (
-                      <Link key={caseItem.id} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border-soft)] bg-[var(--g66-background)] p-2 text-xs font-bold text-[var(--g66-brand-blue)] hover:underline">
+                      <Link key={caseItem.id} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border-soft)] bg-[var(--g66-background)] p-1.5 text-[11px] font-medium text-[var(--g66-brand-blue)] hover:underline">
                         {formatCaseNumber(caseItem.case_number, caseItem.id)} · {caseItem.subject || "Sin asunto"}
                       </Link>
                     ))}
@@ -5377,6 +5508,36 @@ export function CasesConsole({
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {isAssignmentModalOpen && selectedCase ? (
+        <CaseAssignmentModal
+          caseId={selectedCase.id}
+          onClose={() => setIsAssignmentModalOpen(false)}
+          onAssigned={handleCaseAssigned}
+        />
+      ) : null}
+
+      {isDuplicateModalOpen && selectedCase ? (
+        <DuplicateCaseModal
+          source={{
+            id: selectedCase.id,
+            customerLabel: getCustomerLabel(selectedCase),
+            area: selectedCase.area,
+            channel: selectedCase.channel,
+            product: selectedCase.product ?? null,
+            priority: selectedCase.priority,
+            category: selectedCase.category,
+            contactType: selectedCase.contact_type,
+            description: selectedCase.subject,
+            ownerType: selectedCase.owner_type === "QUEUE" ? "QUEUE" : "USER",
+            assignedAgentId: selectedCase.assigned_agent_id,
+            assignedQueueId: selectedCase.assigned_queue_id ?? null,
+          }}
+          customFields={duplicateCustomFields}
+          onClose={() => setIsDuplicateModalOpen(false)}
+          onDuplicated={handleCaseDuplicated}
+        />
       ) : null}
 
       {isMacroModalOpen ? (

@@ -10,15 +10,19 @@ import { Global66Mark } from "./global66-mark";
 import { ToastProvider } from "./toast-provider";
 import { useCrmSession } from "./use-crm-session";
 import { useCrmPermissions } from "./use-crm-permissions";
+import originalStyles from "./cases/case-detail-original.module.css";
+import { caseDetailManrope, caseDetailMono } from "./cases/case-detail-fonts";
 import {
   BarChart3,
   BookOpen,
   BriefcaseBusiness,
+  ChevronRight,
   FileBarChart,
   Home,
   LayoutDashboard,
   Mail,
   MessageCircle,
+  Search,
   Settings,
   Sparkles,
   UserRoundCheck,
@@ -50,6 +54,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const [launcherQuery, setLauncherQuery] = useState("");
   const [casesGlobalSearch, setCasesGlobalSearch] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
+  const [caseBreadcrumbNumber, setCaseBreadcrumbNumber] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const launcherRef = useRef<HTMLDivElement | null>(null);
   const agentId = user?.id ?? "";
@@ -62,7 +67,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === "/dashboard";
   const isCasesConsole = isCaseExpediente;
   const isAccount360 = pathname.startsWith("/cuentas/");
-  const isSidebarCompact = sidebarCollapsed || isAccount360;
+  const isSidebarCompact = sidebarCollapsed || isAccount360 || isCaseExpediente;
   const visibleNavigationItems = getNavigationItems(agentRole, rolePermissions);
   const activeItem =
     [...visibleNavigationItems]
@@ -94,6 +99,22 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   function logoutDemoUser() {
     clearDemoCrmSession();
   }
+
+  useEffect(() => {
+    if (!isCaseExpediente) return;
+
+    function handleCaseHeaderContext(event: Event) {
+      const detail = (event as CustomEvent<{ caseNumber?: string }>).detail;
+      setCaseBreadcrumbNumber(detail?.caseNumber || null);
+    }
+
+    window.addEventListener("case-header-context", handleCaseHeaderContext);
+    window.dispatchEvent(new Event("request-case-header-context"));
+
+    return () => {
+      window.removeEventListener("case-header-context", handleCaseHeaderContext);
+    };
+  }, [isCaseExpediente]);
 
   useEffect(() => {
     if (!isLauncherOpen) return;
@@ -271,13 +292,29 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         ) : null}
 
         <header
-          className={`fixed right-0 top-0 z-40 grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--g66-border)] bg-[var(--g66-surface)] px-2 shadow-[var(--g66-shadow-card)] ${
+          className={`fixed right-0 top-0 z-40 grid items-center border-b border-[var(--g66-border)] bg-[var(--g66-surface)] shadow-sm ${
+            isCaseExpediente
+              ? `${caseDetailManrope.variable} ${caseDetailMono.variable} ${originalStyles.caseTopBar}`
+              : "h-10 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 px-2"
+          } ${
             hasGlobalSidebar ? (isSidebarCompact ? "left-16" : "left-60") : "left-0"
           }`}
         >
-          <div ref={launcherRef} className="relative">
+          <div ref={launcherRef} className="relative min-w-0">
+            {isCaseExpediente ? (
+              <nav aria-label="Breadcrumb" className={`${originalStyles.topBreadcrumb} flex min-w-0 items-center`}>
+                <Link href="/casos" className="inline-flex items-center gap-1.5 text-[var(--g66-text-muted)] transition hover:text-[var(--g66-brand-blue)]">
+                  <BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden="true" />
+                  Casos
+                </Link>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--g66-text-muted)]" aria-hidden="true" />
+                <span className="truncate font-mono text-[var(--g66-text-primary)]">
+                  {caseBreadcrumbNumber || "Cargando..."}
+                </span>
+              </nav>
+            ) : null}
             {hasGlobalSidebar ? (
-              <div className="w-2" aria-hidden="true" />
+              !isCaseExpediente ? <div className="w-2" aria-hidden="true" /> : null
             ) : (
               <button
                 type="button"
@@ -340,16 +377,54 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
           </div>
           {hasGlobalSidebar ? (
             <div className="flex justify-center px-4">
-              <input
-                value={casesGlobalSearch}
-                onChange={(event) => updateCasesGlobalSearch(event.target.value)}
-                placeholder="Buscar clientes, casos, conversaciones..."
-                className={`h-7 w-full rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] px-3 text-sm text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)] focus:border-[var(--g66-brand-blue)] focus:bg-white focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)] ${isAccount360 ? "max-w-lg" : "max-w-2xl"}`}
-              />
+              <label
+                className={`flex w-full items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] text-[var(--g66-text-muted)] focus-within:border-[var(--g66-brand-blue)] focus-within:bg-white focus-within:ring-2 focus-within:ring-[var(--g66-brand-blue-soft)] ${
+                  isCaseExpediente
+                    ? originalStyles.topSearch
+                    : `h-7 px-3 ${isAccount360 ? "max-w-lg" : "max-w-2xl"}`
+                }`}
+              >
+                {isCaseExpediente ? <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+                <input
+                  value={casesGlobalSearch}
+                  onChange={(event) => updateCasesGlobalSearch(event.target.value)}
+                  placeholder="Buscar clientes, casos, conversaciones..."
+                  className="h-full min-w-0 flex-1 bg-transparent text-[13px] font-normal text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)]"
+                />
+              </label>
             </div>
           ) : (
             <div />
           )}
+          {isCaseExpediente ? (
+            <div className={`${originalStyles.topActions} flex min-w-0 items-center justify-end`}>
+              {agentId ? (
+                <div className={`${originalStyles.availability} inline-flex items-center bg-white`}>
+                  <span className="h-2 w-2 rounded-full bg-[var(--g66-success)]" aria-hidden="true" />
+                  <DemoAvailabilitySelect userId={agentId} compact showLabel={false} bare />
+                </div>
+              ) : null}
+              <Link
+                href="/login"
+                onClick={logoutDemoUser}
+                className={`${originalStyles.changeUser} whitespace-nowrap text-[var(--g66-brand-blue)] hover:underline`}
+              >
+                Cambiar usuario
+              </Link>
+              <span className="h-8 w-px bg-[var(--g66-border)]" aria-hidden="true" />
+              <div className={`${originalStyles.currentUser} flex min-w-0 items-center`}>
+                <span className={`${originalStyles.currentUserAvatar} flex shrink-0 items-center justify-center bg-[var(--g66-brand-blue)] text-white`}>
+                  {agentName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className={`${originalStyles.currentUserName} truncate text-[var(--g66-text-primary)]`}>{agentName}</p>
+                  <p className={`${originalStyles.currentUserRole} truncate uppercase`}>
+                    {[agentRole, user?.team || user?.area].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="flex min-w-0 items-center gap-2">
             <span className="hidden truncate text-xs font-semibold text-[var(--g66-text-muted)] sm:inline">
               {activeItem.label}
@@ -376,21 +451,22 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
               Cambiar usuario
             </Link>
           </div>
+          )}
         </header>
 
         <main
           className={
             hasGlobalSidebar
               ? isSidebarCompact
-                ? `pl-16 pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
-                : `pl-60 pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
-              : `pt-10 ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+                ? `pl-16 ${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+                : `pl-60 ${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+              : `${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
           }
         >
           <div
             className={
               isCasesConsole
-                ? "h-[calc(100vh-40px)] min-h-0 w-full overflow-hidden bg-white"
+                ? "h-[calc(100vh-58px)] min-h-0 w-full overflow-hidden bg-white"
                 : isCasesList
                   ? "min-h-[calc(100vh-40px)] w-full bg-[#F4F6FA]"
                 : isDashboard
