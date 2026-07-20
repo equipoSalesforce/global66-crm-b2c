@@ -124,6 +124,31 @@ export type CaseLayoutTabWithSections = CaseLayoutTab & {
   sections: CaseLayoutSectionWithFields[];
 };
 
+export type CaseAreaLayoutField = {
+  fieldKey: string;
+  label: string;
+  order: number;
+  required: boolean;
+  editable: boolean;
+};
+
+export type CaseAreaLayout = {
+  id: string;
+  area: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  fields: CaseAreaLayoutField[];
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+export type ResolvedCaseAreaLayout = CaseAreaLayout & {
+  fieldDefinitions: CaseFieldDefinition[];
+};
+
 export function normalizeFieldKey(value: string) {
   return value
     .toLowerCase()

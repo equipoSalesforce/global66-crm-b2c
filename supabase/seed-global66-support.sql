@@ -42,8 +42,14 @@ insert into seed_customers (idx, name, email, phone) values
 (19, 'Mariana Riquelme', 'mariana.riquelme@example.com', '+56981234519'),
 (20, 'Felipe Alvarado', 'felipe.alvarado@example.com', '+56981234520');
 
-insert into public.customers (id, name, email, phone, created_at)
-select id, name, email, phone, now() - ((21 - idx) || ' days')::interval
+insert into public.customers (id, customer_id, name, email, phone, created_at)
+select
+  id,
+  'DEMO-CUSTOMER-' || lpad(idx::text, 3, '0'),
+  name,
+  email,
+  phone,
+  now() - ((21 - idx) || ' days')::interval
 from seed_customers;
 
 create temp table seed_cases (

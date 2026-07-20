@@ -1,4 +1,4 @@
-import type { Account360 } from "@/lib/account-360-api";
+import type { Account360View } from "@/lib/account-360-api";
 import {
   BadgeDollarSign,
   Building2,
@@ -71,7 +71,7 @@ function approvedLabel(value?: string | null) {
   return ["APPROVED", "VERIFIED"].includes(value.toUpperCase()) ? "Aprobado" : displayValue(value);
 }
 
-export function AccountSidePanel({ account }: { account: Account360 }) {
+export function AccountSidePanel({ account }: { account: Account360View }) {
   const { profile, compliance, banking, benefits, device } = account;
   const termDefinitions = [
     { code: "general_terms", label: "Términos y condiciones generales" },
@@ -85,7 +85,7 @@ export function AccountSidePanel({ account }: { account: Account360 }) {
       <Panel icon={IdCard} title="Detalle de cuenta (KYC)">
         <dl className="grid gap-1.5">
           <DetailField label="Tipo de cliente" value={displayValue(profile.customer_type)} />
-          <DetailField label="ID interno" value={displayValue(account.account_id)} />
+          <DetailField label="ID Cliente" value={displayValue(account.displayCustomerId)} />
           <DetailField label="Segmentación" value={displayValue(profile.segment)} />
           <DetailField label="Plan" value={displayValue(profile.plan)} />
           <DetailField label="País" value={displayValue(profile.country)} />

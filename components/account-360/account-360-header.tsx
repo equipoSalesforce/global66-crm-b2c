@@ -1,4 +1,4 @@
-import type { Account360, AccountBadge } from "@/lib/account-360-api";
+import type { Account360View, AccountBadge } from "@/lib/account-360-api";
 import {
   BadgeCheck,
   Clock3,
@@ -48,7 +48,7 @@ function ProfileDatum({
   );
 }
 
-export function Account360Header({ account }: { account: Account360 }) {
+export function Account360Header({ account }: { account: Account360View }) {
   const { profile } = account;
   const latestProduct = [...account.products]
     .filter((product) => product.last_transaction_at)
@@ -89,7 +89,7 @@ export function Account360Header({ account }: { account: Account360 }) {
             </div>
             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5 text-[11px] font-medium text-[var(--g66-text-secondary)]">
               <ProfileDatum icon={Mail}>{displayValue(profile.email, "Email no disponible")}</ProfileDatum>
-              <ProfileDatum icon={Hash}>{displayValue(profile.account_id, "ID no disponible")}</ProfileDatum>
+              <ProfileDatum icon={Hash}>{displayValue(account.displayCustomerId, "ID no disponible")}</ProfileDatum>
               <ProfileDatum icon={IdCard}>{profile.country ? `${profile.country} · ${documentLabel}` : documentLabel}</ProfileDatum>
               <ProfileDatum icon={Phone}>{displayValue(profile.phone, "Teléfono no disponible")}</ProfileDatum>
               {profile.username ? <ProfileDatum icon={UserRound}>{profile.username}</ProfileDatum> : null}
@@ -114,7 +114,7 @@ export function Account360Header({ account }: { account: Account360 }) {
             </span>
             )}
             <Link
-            href={`/casos/nuevo?customerId=${encodeURIComponent(account.account_id)}`}
+            href={`/casos/nuevo?customerPublicId=${encodeURIComponent(account.publicId)}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--g66-brand-blue)] px-3 text-xs font-bold text-white shadow-sm hover:bg-[var(--g66-brand-blue-hover)]"
           >
             <Plus className="h-4 w-4" /> Nuevo caso

@@ -5,11 +5,61 @@ import { AccountProducts } from "@/components/account-360/account-products";
 import { AccountSidePanel } from "@/components/account-360/account-side-panel";
 import { AccountSummaryMetrics } from "@/components/account-360/account-summary-metrics";
 import { AccountWallets } from "@/components/account-360/account-wallets";
-import { Account360ApiError, getAccount360 } from "@/lib/account-360-api";
+import {
+  Account360ApiError,
+  getAccount360,
+  type Account360View,
+} from "@/lib/account-360-api";
+import {
+  CustomerAccountActivityError,
+  getCustomerCrmActivity,
+} from "@/lib/customer-account-activity-service";
+import {
+  CustomerIdentityError,
+  resolveCustomerIdentityByPublicId,
+} from "@/lib/customer-identity-service";
 import { BriefcaseBusiness, ChevronRight } from "lucide-react";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
+
+function buildAccount360View(
+  account: Awaited<ReturnType<typeof getAccount360>>,
+  publicId: string,
+  customerId: string,
+  crmActivity: Awaited<ReturnType<typeof getCustomerCrmActivity>>,
+): Account360View {
+  const transactionalActivity = account.activity.map((item) => ({
+    ...item,
+    activity_category: item.activity_category || inferActivityCategory(item),
+  }));
+
+  return {
+    ...account,
+    publicId,
+    customerId,
+    displayCustomerId: customerId,
+    activity: [...crmActivity, ...transactionalActivity].sort(
+      (left, right) =>
+        new Date(right.occurred_at).getTime() -
+        new Date(left.occurred_at).getTime(),
+    ),
+  };
+}
+
+function inferActivityCategory(
+  item: Awaited<ReturnType<typeof getAccount360>>["activity"][number],
+) {
+  const value = `${item.activity_type} ${item.channel} ${item.title}`.toUpperCase();
+  if (/TRANSACTION|EXCHANGE|PAYMENT|CARD|P2P|REM/.test(value)) {
+    return "transaction" as const;
+  }
+  if (/EMAIL|MAIL/.test(value)) return "email" as const;
+  if (/WHATSAPP|AI|IA/.test(value)) return "whatsapp_ai" as const;
+  if (/CALL|PHONE|LLAMADA/.test(value)) return "call" as const;
+  if (/CASE|CASO|SUPPORT/.test(value)) return "case" as const;
+  return "other" as const;
+}
 
 export default async function Account360Page({
   params,
@@ -20,9 +70,27 @@ export default async function Account360Page({
   let account;
 
   try {
-    account = await getAccount360(id);
+    const identity = await resolveCustomerIdentityByPublicId(id);
+    if (!identity) notFound();
+
+    const [internalAccount, crmActivity] = await Promise.all([
+      getAccount360(identity.customerId),
+      getCustomerCrmActivity(identity.id),
+    ]);
+    account = buildAccount360View(
+      internalAccount,
+      identity.publicId,
+      identity.customerId,
+      crmActivity,
+    );
   } catch (error) {
     if (error instanceof Account360ApiError && error.status === 404) notFound();
+
+    const unavailableMessage =
+      error instanceof CustomerIdentityError ||
+      error instanceof CustomerAccountActivityError
+        ? "No pudimos resolver la identidad interna de esta cuenta."
+        : "Verifica que FastAPI esté ejecutándose e inténtalo nuevamente.";
 
     return (
       <section className="rounded-2xl border border-[var(--g66-danger-soft)] bg-white p-8 shadow-sm">
@@ -33,7 +101,7 @@ export default async function Account360Page({
           No pudimos cargar esta cuenta
         </h1>
         <p className="mt-2 text-sm text-[var(--g66-text-secondary)]">
-          Verifica que FastAPI esté ejecutándose e inténtalo nuevamente.
+          {unavailableMessage}
         </p>
       </section>
     );
@@ -53,7 +121,7 @@ export default async function Account360Page({
           <AccountSummaryMetrics metrics={account.metrics} />
           <AccountWallets
             wallets={account.wallets}
-            accountId={account.account_id}
+            accountId={account.customerId}
             movements={account.activity}
           />
           <AccountProducts products={account.products} />
