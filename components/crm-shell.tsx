@@ -31,6 +31,7 @@ import {
 const navigationIconByHref: Record<string, LucideIcon> = {
   "/dashboard": Home,
   "/paneles": LayoutDashboard,
+  "/dashboards": BarChart3,
   "/informes": FileBarChart,
   "/casos": BriefcaseBusiness,
   "/clientes": UsersRound,
