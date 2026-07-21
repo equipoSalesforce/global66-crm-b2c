@@ -45,6 +45,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   Bot,
@@ -53,12 +54,14 @@ import {
   CornerDownLeft,
   Copy,
   FileText,
+  FileSpreadsheet,
   History,
   Layers3,
   Mail,
   MessageCircle,
   Paperclip,
   PhoneCall,
+  Search,
   User,
   UserPlus,
   Wand2,
@@ -1770,6 +1773,84 @@ function getSavedViews() {
   }
 }
 
+function HighlightedMessageText({ text, query }: { text: string; query: string }) {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return text;
+
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
+
+  return parts.map((part, index) =>
+    part.toLocaleLowerCase().includes(normalizedQuery.toLocaleLowerCase()) ? (
+      <mark key={`${part}-${index}`} className="rounded bg-amber-200 px-0.5 text-inherit">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function getExportDateParts(value: string | null | undefined) {
+  if (!value) return { date: "Sin fecha", time: "Sin hora" };
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return { date: "Sin fecha", time: "Sin hora" };
+  }
+
+  return {
+    date: new Intl.DateTimeFormat("es-CL", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(parsedDate),
+    time: new Intl.DateTimeFormat("es-CL", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(parsedDate),
+  };
+}
+
+function escapeCsvCell(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getWhatsappExportFields(message: ConsoleMessageRecord) {
+  const outbound = isOutbound(message);
+  const { date, time } = getExportDateParts(message.created_at);
+
+  return {
+    date,
+    time,
+    direction: message.direction || (outbound ? "Saliente" : "Entrante"),
+    author: message.sender_type || (outbound ? "Agente" : "Cliente"),
+    body: message.body || "Sin contenido",
+    channel: message.channel || "WHATSAPP",
+    type: message.message_type || message.media_type || "Texto",
+  };
+}
+
+function sortMessagesChronologically(messages: ConsoleMessageRecord[]) {
+  return [...messages].sort((messageA, messageB) => {
+    const timestampA = new Date(messageA.created_at ?? 0).getTime();
+    const timestampB = new Date(messageB.created_at ?? 0).getTime();
+
+    return (Number.isNaN(timestampA) ? 0 : timestampA) -
+      (Number.isNaN(timestampB) ? 0 : timestampB);
+  });
+}
+
 export function CasesConsole({
   cases,
   messages,
@@ -1788,6 +1869,7 @@ export function CasesConsole({
   const toast = useToast();
   const router = useRouter();
   const { role } = useDemoRole();
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const [caseItems, setCaseItems] = useState(cases);
   const [messageItems, setMessageItems] = useState(messages);
@@ -1813,6 +1895,11 @@ export function CasesConsole({
         : null) ?? cases[0],
     ),
   );
+  const [isWhatsappSearchOpen, setIsWhatsappSearchOpen] = useState(false);
+  const [whatsappSearchQuery, setWhatsappSearchQuery] = useState("");
+  const [whatsappSearchIndex, setWhatsappSearchIndex] = useState(0);
+  const [isWhatsappExpanded, setIsWhatsappExpanded] = useState(false);
+  const [isWhatsappAtBottom, setIsWhatsappAtBottom] = useState(true);
   const [ticketTab, setTicketTab] = useState<TicketTab>("publish");
   const [isTicketDraftDirty, setIsTicketDraftDirty] = useState(false);
   const [isCustomLayoutDirty, setIsCustomLayoutDirty] = useState(false);
@@ -2767,6 +2854,20 @@ export function CasesConsole({
 
     return !channel || channel === "WHATSAPP" || channel === "AI";
   });
+  const normalizedWhatsappSearchQuery = whatsappSearchQuery.trim().toLocaleLowerCase();
+  const whatsappSearchMatches = normalizedWhatsappSearchQuery
+    ? selectedWhatsappMessages.filter((message) =>
+        [message.sender_type, message.body]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(normalizedWhatsappSearchQuery),
+      )
+    : [];
+  const effectiveWhatsappSearchIndex = whatsappSearchMatches.length > 0
+    ? Math.min(whatsappSearchIndex, whatsappSearchMatches.length - 1)
+    : 0;
+  const currentWhatsappSearchMessage = whatsappSearchMatches[effectiveWhatsappSearchIndex] ?? null;
   const selectedLatestMessage = selectedCase
     ? latestMessageByCase.get(selectedCase.id)
     : undefined;
@@ -2814,6 +2915,25 @@ export function CasesConsole({
   const selectedMacro =
     activeMacros.find((macro) => macro.id === selectedMacroId) ?? null;
 
+  const updateWhatsappScrollPosition = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setIsWhatsappAtBottom(distanceFromBottom <= 120);
+  }, []);
+
+  const scrollWhatsappToBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    } else {
+      conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    setIsWhatsappAtBottom(true);
+  }, []);
+
   useEffect(() => {
     if (!selectedCase) return;
 
@@ -2834,7 +2954,24 @@ export function CasesConsole({
     if (workTab !== "whatsapp") return;
 
     conversationEndRef.current?.scrollIntoView({ block: "end" });
-  }, [workTab, selectedCase?.id, selectedWhatsappMessages.length]);
+    const animationFrame = window.requestAnimationFrame(updateWhatsappScrollPosition);
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [workTab, selectedCase?.id, selectedWhatsappMessages.length, updateWhatsappScrollPosition]);
+
+  useEffect(() => {
+    if (workTab !== "whatsapp") return;
+
+    const animationFrame = window.requestAnimationFrame(updateWhatsappScrollPosition);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isWhatsappExpanded, workTab, updateWhatsappScrollPosition]);
+
+  useEffect(() => {
+    if (!currentWhatsappSearchMessage) return;
+    document
+      .getElementById(`whatsapp-message-${String(currentWhatsappSearchMessage.id)}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [currentWhatsappSearchMessage]);
 
   function updateLocalCase(caseId: string, values: Partial<ConsoleCaseRecord>) {
     setCaseItems((currentCases) =>
@@ -2870,6 +3007,108 @@ export function CasesConsole({
     }
 
     setAttachmentItems(payload.attachments ?? []);
+  }
+
+  function getWhatsappExportFileBase() {
+    const caseReference = (selectedCaseNumberLabel || selectedCase?.id || "caso")
+      .replace(/^#/, "")
+      .replace(/[^a-zA-Z0-9_-]+/g, "-");
+    const exportDate = new Date().toISOString().slice(0, 10);
+
+    return `conversacion-whatsapp-${caseReference}-${exportDate}`;
+  }
+
+  function exportWhatsappConversationCsv() {
+    const headers = ["Fecha", "Hora", "Dirección", "Autor", "Mensaje", "Canal", "Tipo"];
+    const rows = sortMessagesChronologically(selectedWhatsappMessages).map((message) => {
+      const fields = getWhatsappExportFields(message);
+
+      return [
+        fields.date,
+        fields.time,
+        fields.direction,
+        fields.author,
+        fields.body,
+        fields.channel,
+        fields.type,
+      ].map(escapeCsvCell).join(";");
+    });
+    const csv = [headers.map(escapeCsvCell).join(";"), ...rows].join("\r\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `${getWhatsappExportFileBase()}.csv`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+    toast.success("Conversación exportada para Excel.");
+  }
+
+  function printWhatsappConversation() {
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      toast.error("El navegador bloqueó la vista imprimible.");
+      return;
+    }
+
+    printWindow.opener = null;
+    const caseLabel = selectedCaseNumberLabel || selectedCase?.id || "Sin número";
+    const chronologicalMessages = sortMessagesChronologically(selectedWhatsappMessages);
+    const messageHtml = chronologicalMessages.map((message) => {
+      const fields = getWhatsappExportFields(message);
+
+      return `
+        <article class="message">
+          <div class="metadata">
+            <span>${escapeHtml(fields.date)} · ${escapeHtml(fields.time)}</span>
+            <span>${escapeHtml(fields.direction)} · ${escapeHtml(fields.author)}</span>
+          </div>
+          <p>${escapeHtml(fields.body)}</p>
+        </article>
+      `;
+    }).join("");
+    const exportedAt = new Intl.DateTimeFormat("es-CL", {
+      dateStyle: "long",
+      timeStyle: "short",
+    }).format(new Date());
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <title>Conversación WhatsApp - ${escapeHtml(caseLabel)}</title>
+          <style>
+            @page { margin: 18mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #101828; font: 13px/1.5 Arial, sans-serif; }
+            header { margin-bottom: 20px; border-bottom: 1px solid #dfe5ee; padding-bottom: 14px; }
+            h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
+            .summary { margin: 0; color: #667085; font-size: 12px; }
+            .message { break-inside: avoid; margin-bottom: 10px; border: 1px solid #dfe5ee; border-radius: 8px; padding: 10px 12px; }
+            .metadata { display: flex; justify-content: space-between; gap: 16px; color: #667085; font-size: 11px; }
+            .message p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <h1>Conversación WhatsApp</h1>
+            <p class="summary">Caso: ${escapeHtml(caseLabel)}</p>
+            <p class="summary">Fecha de exportación: ${escapeHtml(exportedAt)}</p>
+            <p class="summary">Total de mensajes: ${chronologicalMessages.length.toLocaleString("es-CL")}</p>
+          </header>
+          <main>${messageHtml || '<p class="summary">No hay mensajes cargados.</p>'}</main>
+        </body>
+      </html>`);
+    printWindow.document.close();
+    printWindow.addEventListener("afterprint", () => printWindow.close(), { once: true });
+    window.setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 250);
   }
 
   async function recordAuditEvents(events: CaseAuditEventInput[]) {
@@ -3728,6 +3967,10 @@ export function CasesConsole({
     setSelectedEmailMessage(null);
     setRelatedView(null);
     setIsCaseInfoEditing(false);
+    setIsWhatsappSearchOpen(false);
+    setWhatsappSearchQuery("");
+    setWhatsappSearchIndex(0);
+    setIsWhatsappExpanded(false);
     setWorkTab(getDefaultWorkTab(nextCase));
     router.push(`/casos/${caseId}`);
   }
@@ -4508,7 +4751,50 @@ export function CasesConsole({
                 </div>
               </section>
 
-              <section className={`${originalStyles.conversationCard} flex min-h-0 flex-1 flex-col overflow-hidden bg-white`}>
+              {isWhatsappExpanded && workTab === "whatsapp" ? (
+                <div className="fixed inset-0 z-[60] bg-slate-950/45" aria-hidden="true" />
+              ) : null}
+              <section className={`${originalStyles.conversationCard} flex min-h-0 flex-1 flex-col overflow-hidden bg-white ${isWhatsappExpanded && workTab === "whatsapp" ? "fixed inset-4 z-[70] m-0 shadow-2xl" : ""}`}>
+                {isWhatsappExpanded && workTab === "whatsapp" ? (
+                  <div className="relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-[var(--g66-border)] bg-white px-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <MessageCircle className="h-4 w-4 shrink-0 text-[var(--g66-success)]" aria-hidden="true" />
+                      <span className="text-sm font-semibold text-[var(--g66-text-primary)]">WhatsApp</span>
+                      <span className="text-xs text-[var(--g66-text-secondary)]">
+                        {selectedWhatsappMessages.length.toLocaleString("es-CL")} mensajes
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        title="Descargar conversación en PDF"
+                        aria-label="Descargar conversación en PDF"
+                        onClick={printWhatsappConversation}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
+                      >
+                        <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Descargar conversación en Excel"
+                        aria-label="Descargar conversación en Excel"
+                        onClick={exportWhatsappConversationCsv}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-success)] hover:bg-[var(--g66-success-soft)] hover:text-[var(--g66-success)]"
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Cerrar conversación ampliada"
+                        aria-label="Cerrar conversación ampliada"
+                        onClick={() => setIsWhatsappExpanded(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-danger)] hover:bg-[var(--g66-danger-soft)] hover:text-[var(--g66-danger)]"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className={`${originalStyles.tabsBar} flex shrink-0 border-b bg-white`}>
                   {[
                     {
@@ -4573,18 +4859,48 @@ export function CasesConsole({
 
                 {workTab === "whatsapp" ? (
                   <div className="flex min-h-0 flex-1 flex-col gap-1.5 bg-[var(--g66-surface-soft)] p-2">
-                    <div className="flex h-7 shrink-0 items-center justify-between rounded-full border border-[var(--g66-success-soft)] bg-white px-3">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-[var(--g66-success)]">
-                        <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                        WhatsApp
-                      </span>
-                      <span className="text-[11px] font-semibold text-[var(--g66-text-secondary)]">
-                        {selectedWhatsappMessages.length.toLocaleString("es-CL")} mensajes
-                      </span>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-y-auto rounded-[var(--g66-radius-lg)] border border-[var(--g66-border-soft)] bg-[linear-gradient(180deg,#FFFFFF_0%,var(--g66-background)_100%)] p-3">
-                      {selectedWhatsappMessages.length > 0 ? (
-                        <div className="space-y-2">
+                    {!isWhatsappExpanded ? (
+                      <div className="flex h-7 shrink-0 items-center justify-between rounded-full border border-[var(--g66-success-soft)] bg-white px-3">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-[var(--g66-success)]">
+                          <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                          WhatsApp
+                        </span>
+                        <span className="text-[11px] font-semibold text-[var(--g66-text-secondary)]">
+                          {selectedWhatsappMessages.length.toLocaleString("es-CL")} mensajes
+                        </span>
+                      </div>
+                    ) : null}
+                    {isWhatsappSearchOpen ? (
+                      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--g66-border)] bg-white px-2 py-1.5">
+                        <Search className="h-3.5 w-3.5 shrink-0 text-[var(--g66-text-muted)]" aria-hidden="true" />
+                        <input
+                          autoFocus
+                          value={whatsappSearchQuery}
+                          onChange={(event) => {
+                            setWhatsappSearchQuery(event.target.value);
+                            setWhatsappSearchIndex(0);
+                          }}
+                          placeholder="Buscar en esta conversación"
+                          className="min-w-0 flex-1 bg-transparent text-xs text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)]"
+                        />
+                        <span className="whitespace-nowrap text-[11px] font-semibold text-[var(--g66-text-secondary)]">
+                          {whatsappSearchMatches.length > 0 ? effectiveWhatsappSearchIndex + 1 : 0} de {whatsappSearchMatches.length}
+                        </span>
+                        <button type="button" disabled={whatsappSearchMatches.length === 0} onClick={() => setWhatsappSearchIndex((effectiveWhatsappSearchIndex - 1 + whatsappSearchMatches.length) % whatsappSearchMatches.length)} aria-label="Coincidencia anterior" className="h-7 w-7 rounded border border-[var(--g66-border)] text-xs disabled:opacity-40">↑</button>
+                        <button type="button" disabled={whatsappSearchMatches.length === 0} onClick={() => setWhatsappSearchIndex((effectiveWhatsappSearchIndex + 1) % whatsappSearchMatches.length)} aria-label="Coincidencia siguiente" className="h-7 w-7 rounded border border-[var(--g66-border)] text-xs disabled:opacity-40">↓</button>
+                        <button type="button" onClick={() => { setIsWhatsappSearchOpen(false); setWhatsappSearchQuery(""); setWhatsappSearchIndex(0); }} aria-label="Cerrar búsqueda" className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--g66-text-secondary)] hover:bg-[var(--g66-background)]">
+                          <X className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : null}
+                    <div className="relative min-h-0 flex-1">
+                      <div
+                        ref={messagesContainerRef}
+                        onScroll={updateWhatsappScrollPosition}
+                        className="h-full overflow-y-auto rounded-[var(--g66-radius-lg)] border border-[var(--g66-border-soft)] bg-[linear-gradient(180deg,#FFFFFF_0%,var(--g66-background)_100%)] p-3"
+                      >
+                        {selectedWhatsappMessages.length > 0 ? (
+                          <div className="space-y-2">
                           {selectedWhatsappMessages.map((message) => {
                             const outbound = isOutbound(message);
                             const deliveryStatusMeta = outbound
@@ -4594,11 +4910,13 @@ export function CasesConsole({
                               attachmentItems,
                               message.id,
                             ).filter((attachment) => attachment.source === "WHATSAPP");
+                            const isCurrentSearchMatch = currentWhatsappSearchMessage?.id === message.id;
 
                             return (
                               <article
                                 key={message.id}
-                                className={`flex ${outbound ? "justify-end" : "justify-start"}`}
+                                id={`whatsapp-message-${String(message.id)}`}
+                                className={`flex rounded-lg transition ${outbound ? "justify-end" : "justify-start"} ${isCurrentSearchMatch ? "ring-2 ring-amber-400 ring-offset-2" : ""}`}
                               >
                                 <div
                                   className={`${messageWidthClass(message)} rounded-[var(--g66-radius-lg)] px-3 py-2 shadow-[var(--g66-shadow-card)] ${bubbleClass(message)}`}
@@ -4612,7 +4930,7 @@ export function CasesConsole({
                                     </span>
                                   </div>
                                   <p className="whitespace-pre-wrap text-sm leading-5">
-                                    {message.body || "Sin contenido"}
+                                    <HighlightedMessageText text={message.body || "Sin contenido"} query={whatsappSearchQuery} />
                                   </p>
                                   {mediaAttachments.length > 0 ? (
                                     <div className="grid gap-1">
@@ -4637,16 +4955,40 @@ export function CasesConsole({
                               </article>
                             );
                           })}
-                          <div ref={conversationEndRef} />
-                        </div>
-                      ) : (
-                        <p className="rounded-md border border-dashed border-gray-300 bg-white p-3 text-sm text-gray-600">
-                          Este caso aún no tiene mensajes.
-                        </p>
-                      )}
+                            <div ref={conversationEndRef} />
+                          </div>
+                        ) : (
+                          <p className="rounded-md border border-dashed border-gray-300 bg-white p-3 text-sm text-gray-600">
+                            Este caso aún no tiene mensajes.
+                          </p>
+                        )}
+                      </div>
+                      {!isWhatsappAtBottom && selectedWhatsappMessages.length > 0 ? (
+                        <button
+                          type="button"
+                          title="Ir al final de la conversación"
+                          aria-label="Ir al final de la conversación"
+                          onClick={scrollWhatsappToBottom}
+                          className="absolute bottom-4 right-4 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-brand-blue)] shadow-[0_8px_20px_rgb(15_23_42/0.18)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+                        >
+                          <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      ) : null}
                     </div>
                     <div className="shrink-0 rounded-[var(--g66-radius-lg)] border border-[var(--g66-border-soft)] bg-white shadow-[var(--g66-shadow-card)]">
-                      <CaseReplyForm caseId={selectedCase.id} compact />
+                      <CaseReplyForm
+                        caseId={selectedCase.id}
+                        compact
+                        isExpanded={isWhatsappExpanded}
+                        onToggleSearch={() => setIsWhatsappSearchOpen((current) => !current)}
+                        onToggleExpanded={() => setIsWhatsappExpanded((current) => !current)}
+                        onRefresh={async () => {
+                          await Promise.all([
+                            refreshCaseMessages(selectedCase.id),
+                            refreshCaseAttachments(selectedCase.id),
+                          ]);
+                        }}
+                      />
                     </div>
                   </div>
                 ) : null}

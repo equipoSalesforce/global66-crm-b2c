@@ -125,6 +125,19 @@ export default async function ConfiguracionPage() {
             </Link>
           </section>
 
+          <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-gray-950">Mensajes rápidos</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              Administra respuestas reutilizables para el composer de WhatsApp.
+            </p>
+            <Link
+              href="/configuracion/mensajes-rapidos"
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-semibold text-white hover:bg-[var(--g66-accent-cyan)]"
+            >
+              Gestionar mensajes rápidos
+            </Link>
+          </section>
+
         <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
             <h2 className="text-lg font-bold text-gray-950">Configuración IA</h2>

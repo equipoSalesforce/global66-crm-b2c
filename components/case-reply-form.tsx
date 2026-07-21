@@ -2,19 +2,24 @@
 
 import { hasPermission } from "@/lib/permissions";
 import {
+  defaultChatSettings,
+  type CrmQuickMessage,
+  type CrmUserChatSettings,
+} from "@/lib/whatsapp-chat-types";
+import {
+  Clock3,
+  Expand,
   FileText,
-  Mic,
   Paperclip,
+  RefreshCw,
+  Search,
   Send,
-  Smile,
-  Square,
-  Sticker,
-  ThumbsUp,
+  Settings,
   Wand2,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useToast } from "./toast-provider";
 import { useDemoRole } from "./use-demo-role";
 
@@ -37,30 +42,7 @@ type AiSuggestionResponse = {
 };
 
 type MediaKind = "image" | "audio" | "document" | "video" | "sticker" | null;
-type PopoverKind = "emoji" | "sticker" | "template" | null;
-
-const frequentEmojis = ["😀", "😅", "😂", "😊", "🙌", "👍", "👀", "🙏", "❤️", "🚀", "✅", "❌", "⚠️"];
-
-const templates = [
-  {
-    label: "Solicitud de antecedentes",
-    text: "Para revisar tu solicitud, compártenos el correo asociado, fecha, monto aproximado y comprobante si corresponde. No envíes claves ni códigos.",
-  },
-  {
-    label: "Transferencia en revisión",
-    text: "Estamos revisando el estado de tu transferencia. Te avisaremos apenas tengamos una actualización.",
-  },
-  {
-    label: "Cierre cordial",
-    text: "Gracias por contactarnos. Si necesitas algo más, quedamos atentos para ayudarte.",
-  },
-];
-
-const demoStickers = [
-  { key: "ok", label: "OK", text: "OK" },
-  { key: "gracias", label: "Gracias", text: "Gracias" },
-  { key: "revision", label: "En revisión", text: "En revisión" },
-];
+type PopoverKind = "quick-messages" | "snooze" | null;
 
 const maxDemoAudioFileSizeBytes = 5 * 1024 * 1024;
 const maxDemoAudioSeconds = 60;
@@ -92,40 +74,6 @@ function isWebmAudio(file: File) {
   return file.type.toLowerCase().split(";")[0]?.trim() === "audio/webm";
 }
 
-async function createStickerFile(sticker: { key: string; text: string }) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 512;
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    throw new Error("No se pudo crear sticker demo.");
-  }
-
-  const rootStyles = getComputedStyle(document.documentElement);
-  const brandBlueSoft =
-    rootStyles.getPropertyValue("--g66-brand-blue-soft").trim() || "#EAF1FF";
-  const brandBlue =
-    rootStyles.getPropertyValue("--g66-brand-blue").trim() || "#205EF1";
-
-  context.fillStyle = brandBlueSoft;
-  context.fillRect(0, 0, 512, 512);
-  context.fillStyle = brandBlue;
-  context.font = "bold 58px Arial";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(sticker.text, 256, 256, 430);
-
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/webp", 0.92),
-  );
-
-  if (!blob) {
-    throw new Error("Este navegador no pudo generar sticker WebP.");
-  }
-
-  return new File([blob], `${sticker.key}.webp`, { type: "image/webp" });
-}
 
 function ToolbarButton({
   label,
@@ -152,51 +100,90 @@ function ToolbarButton({
   );
 }
 
+function ColorSettingRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[minmax(0,1fr)_34px_92px] items-center gap-2 text-xs text-[var(--g66-text-secondary)]">
+      <span>{label}</span>
+      <input type="color" value={value} onChange={(event) => onChange(event.target.value.toUpperCase())} className="h-8 w-8 cursor-pointer rounded border border-[var(--g66-border)] bg-white p-0.5" />
+      <input value={value} onChange={(event) => onChange(event.target.value.toUpperCase())} maxLength={7} className="h-8 rounded-lg border border-[var(--g66-border)] px-2 font-mono text-xs uppercase outline-none focus:border-[var(--g66-brand-blue)]" />
+    </label>
+  );
+}
+
 export function CaseReplyForm({
   caseId,
   compact = false,
+  onToggleSearch,
+  onToggleExpanded,
+  onRefresh,
+  isExpanded = false,
 }: {
   caseId: string;
   compact?: boolean;
+  onToggleSearch?: () => void;
+  onToggleExpanded?: () => void;
+  onRefresh?: () => Promise<void> | void;
+  isExpanded?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
   const { role, isCheckingRole } = useDemoRole();
+  const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const recordingCancelledRef = useRef(false);
-  const recordingSecondsRef = useRef(0);
   const previewUrlRef = useRef<string | null>(null);
-  const recordingIntervalRef = useRef<number | null>(null);
   const [body, setBody] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaKind, setMediaKind] = useState<MediaKind>(null);
   const [audioDurationSeconds, setAudioDurationSeconds] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedStickerLabel, setSelectedStickerLabel] = useState<string | null>(null);
   const [popover, setPopover] = useState<PopoverKind>(null);
+  const [quickMessages, setQuickMessages] = useState<CrmQuickMessage[]>([]);
+  const [isLoadingQuickMessages, setIsLoadingQuickMessages] = useState(false);
+  const [chatSettings, setChatSettings] = useState<CrmUserChatSettings>(defaultChatSettings);
+  const [settingsDraft, setSettingsDraft] = useState<CrmUserChatSettings>(defaultChatSettings);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const canRespond = hasPermission(role, "respondToCustomers");
 
-  useEffect(
-    () => () => {
-      if (recordingIntervalRef.current) {
-        window.clearInterval(recordingIntervalRef.current);
-      }
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/chat/settings", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          settings?: CrmUserChatSettings;
+          error?: string;
+        };
+        if (!response.ok || !payload.settings) {
+          throw new Error(payload.error || "No se pudo cargar la configuración.");
+        }
+        setChatSettings(payload.settings);
+        setSettingsDraft(payload.settings);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("[case-reply-form] Error loading chat settings", error);
+      });
+
+    return () => {
+      controller.abort();
       if (previewUrlRef.current) {
         URL.revokeObjectURL(previewUrlRef.current);
       }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    },
-    [],
-  );
+    };
+  }, []);
 
   function insertText(text: string) {
     const textarea = textareaRef.current;
@@ -229,107 +216,9 @@ export function CaseReplyForm({
     const nextPreviewUrl = file ? URL.createObjectURL(file) : null;
     previewUrlRef.current = nextPreviewUrl;
     setPreviewUrl(nextPreviewUrl);
-    setSelectedStickerLabel(null);
     setError(null);
     if (!file && fileInputRef.current) {
       fileInputRef.current.value = "";
-    }
-  }
-
-  async function selectDemoSticker(sticker: (typeof demoStickers)[number]) {
-    try {
-      const file = await createStickerFile(sticker);
-      selectFile(file, "sticker");
-      setSelectedStickerLabel(sticker.label);
-      setPopover(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setError(message);
-      toast.error(`✗ ${message}`);
-    }
-  }
-
-  async function startRecording() {
-    if (typeof window === "undefined" || !navigator.mediaDevices || !window.MediaRecorder) {
-      toast.error("Grabación de audio no soportada en este navegador.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-
-      chunksRef.current = [];
-      streamRef.current = stream;
-      recorderRef.current = recorder;
-      recordingCancelledRef.current = false;
-      recordingSecondsRef.current = 0;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        if (recordingCancelledRef.current) {
-          recordingCancelledRef.current = false;
-          chunksRef.current = [];
-          return;
-        }
-
-        const mimeType = recorder.mimeType?.split(";")[0] || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        const file = new File([blob], `nota-voz-${Date.now()}.webm`, {
-          type: mimeType,
-        });
-
-        selectFile(file, "audio");
-        setAudioDurationSeconds(recordingSecondsRef.current);
-        recordingSecondsRef.current = 0;
-        stream.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      };
-      recorder.start();
-      setRecordingSeconds(0);
-      setIsRecording(true);
-      recordingIntervalRef.current = window.setInterval(() => {
-        setRecordingSeconds((seconds) => {
-          const nextSeconds = seconds + 1;
-          recordingSecondsRef.current = nextSeconds;
-
-          if (nextSeconds >= maxDemoAudioSeconds) {
-            window.setTimeout(stopRecording, 0);
-          }
-
-          return nextSeconds;
-        });
-      }, 1000);
-    } catch (error) {
-      console.error("[case-reply-form] Error starting audio recording", { error });
-      toast.error("No se pudo iniciar la grabación de audio.");
-    }
-  }
-
-  function stopRecording() {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setIsRecording(false);
-    if (recordingIntervalRef.current) {
-      window.clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
-    }
-  }
-
-  function cancelRecording() {
-    recordingCancelledRef.current = true;
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    chunksRef.current = [];
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    setIsRecording(false);
-    setRecordingSeconds(0);
-    recordingSecondsRef.current = 0;
-    if (recordingIntervalRef.current) {
-      window.clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
     }
   }
 
@@ -363,6 +252,80 @@ export function CaseReplyForm({
       toast.error(`✗ ${message}`);
     } finally {
       setIsGeneratingSuggestion(false);
+    }
+  }
+
+  async function openQuickMessages() {
+    const nextPopover = popover === "quick-messages" ? null : "quick-messages";
+    setPopover(nextPopover);
+    if (!nextPopover || quickMessages.length > 0 || isLoadingQuickMessages) return;
+
+    setIsLoadingQuickMessages(true);
+    try {
+      const response = await fetch("/api/chat/quick-messages", { cache: "no-store" });
+      const payload = (await response.json()) as {
+        messages?: CrmQuickMessage[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "No se pudieron cargar los mensajes rápidos.");
+      setQuickMessages(payload.messages ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron cargar los mensajes rápidos.");
+      setPopover(null);
+    } finally {
+      setIsLoadingQuickMessages(false);
+    }
+  }
+
+  function selectSnooze(minutes: number) {
+    setPopover(null);
+    toast.info(`Snooze seleccionado: ${minutes} minutos`);
+  }
+
+  async function refreshConversation() {
+    setIsRefreshing(true);
+    try {
+      await onRefresh?.();
+      router.refresh();
+      toast.success("Actualizado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo actualizar la conversación.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function saveChatSettings() {
+    setIsSavingSettings(true);
+    try {
+      const response = await fetch("/api/chat/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsDraft),
+      });
+      const payload = (await response.json()) as {
+        settings?: CrmUserChatSettings;
+        error?: string;
+      };
+      if (!response.ok || !payload.settings) {
+        throw new Error(payload.error || "No se pudo guardar la configuración.");
+      }
+      setChatSettings(payload.settings);
+      setSettingsDraft(payload.settings);
+      setIsSettingsOpen(false);
+      toast.success("Configuración guardada.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la configuración.");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!chatSettings.enter_to_send || event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    if (!composerDisabled && (body.trim() || mediaFile)) {
+      formRef.current?.requestSubmit();
     }
   }
 
@@ -452,7 +415,6 @@ export function CaseReplyForm({
 
     setBody("");
     selectFile(null);
-    setSelectedStickerLabel(null);
     if (isMediaPayload) {
       toast.success("Archivo enviado por WhatsApp");
     } else {
@@ -478,7 +440,7 @@ export function CaseReplyForm({
     isCheckingRole || !canRespond || isSending || isGeneratingSuggestion;
   const isProcessingAudio = isSending && mediaKind === "audio";
   const canSend =
-    !composerDisabled && !isRecording && (body.trim().length > 0 || Boolean(mediaFile));
+    !composerDisabled && (body.trim().length > 0 || Boolean(mediaFile));
 
   const composer = (
     <>
@@ -491,6 +453,7 @@ export function CaseReplyForm({
           setBody(event.target.value);
           if (error) setError(null);
         }}
+        onKeyDown={handleComposerKeyDown}
         rows={compact ? 1 : 3}
         placeholder={canRespond ? "Escribe tu mensaje..." : "Tu perfil tiene acceso de solo lectura."}
         className="max-h-28 min-h-11 w-full resize-none rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white px-4 py-3 text-sm leading-5 text-[var(--g66-text-primary)] outline-none transition [field-sizing:content] placeholder:text-[var(--g66-text-muted)] focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:bg-[var(--g66-surface-soft)] disabled:text-[var(--g66-text-secondary)]"
@@ -518,7 +481,7 @@ export function CaseReplyForm({
             />
           ) : mediaKind === "sticker" ? (
             <span className="rounded bg-[var(--g66-brand-blue-soft)] px-2 py-1 text-xs font-bold text-[var(--g66-brand-blue)]">
-              {selectedStickerLabel || "Sticker"}
+              Sticker
             </span>
           ) : (
             <FileText className="h-5 w-5 text-[var(--g66-accent-cyan)]" aria-hidden="true" />
@@ -540,28 +503,21 @@ export function CaseReplyForm({
         </div>
       ) : null}
 
-      {isRecording ? (
-        <div className="mt-1 flex items-center gap-2 rounded-md border border-[var(--g66-danger-soft)] bg-[var(--g66-danger-soft)] p-2 text-xs font-bold text-[var(--g66-danger)]">
-          Grabando... {recordingSeconds}s
-          <button type="button" onClick={stopRecording} className="rounded bg-white px-2 py-1">
-            Detener
-          </button>
-          <button type="button" onClick={cancelRecording} className="rounded bg-white px-2 py-1">
-            Cancelar
-          </button>
-        </div>
-      ) : null}
-
       <div className="relative mt-2 flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1">
-          <ToolbarButton label="Emoji" disabled={composerDisabled} onClick={() => setPopover(popover === "emoji" ? null : "emoji")}>
-            <Smile className="h-3.5 w-3.5" aria-hidden="true" />
+          <ToolbarButton label="Mensajes Rápidos" disabled={composerDisabled} onClick={() => void openQuickMessages()}>
+            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
           </ToolbarButton>
-          <ToolbarButton label="Sticker" disabled={composerDisabled} onClick={() => setPopover(popover === "sticker" ? null : "sticker")}>
-            <Sticker className="h-3.5 w-3.5" aria-hidden="true" />
+          <ToolbarButton
+            label={isGeneratingSuggestion ? "Generando sugerencia IA" : "Sugerencia IA"}
+            disabled={composerDisabled}
+            onClick={handleAiSuggestion}
+          >
+            <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
           </ToolbarButton>
           <label
-            title="Adjuntar archivo"
+            title="Adjuntar"
+            aria-label="Adjuntar"
             className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
           >
             <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
@@ -574,21 +530,20 @@ export function CaseReplyForm({
               onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          <ToolbarButton label="Audio" disabled={composerDisabled} onClick={isRecording ? stopRecording : startRecording}>
-            {isRecording ? <Square className="h-3.5 w-3.5" aria-hidden="true" /> : <Mic className="h-3.5 w-3.5" aria-hidden="true" />}
+          <ToolbarButton label="Snooze" disabled={composerDisabled} onClick={() => setPopover(popover === "snooze" ? null : "snooze")}>
+            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
           </ToolbarButton>
-          <ToolbarButton label="Plantilla" disabled={composerDisabled} onClick={() => setPopover(popover === "template" ? null : "template")}>
-            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+          <ToolbarButton label="Buscar" onClick={() => onToggleSearch?.()}>
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
           </ToolbarButton>
-          <ToolbarButton
-            label={isGeneratingSuggestion ? "Generando sugerencia IA" : "Sugerencia IA"}
-            disabled={composerDisabled}
-            onClick={handleAiSuggestion}
-          >
-            <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
+          <ToolbarButton label={isExpanded ? "Cerrar ventana ampliada" : "Abrir ventana"} onClick={() => onToggleExpanded?.()}>
+            <Expand className="h-3.5 w-3.5" aria-hidden="true" />
           </ToolbarButton>
-          <ToolbarButton label="Like rápido" disabled={composerDisabled} onClick={() => insertText("👍")}>
-            <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
+          <ToolbarButton label="Configuración" onClick={() => { setSettingsDraft(chatSettings); setPopover(null); setIsSettingsOpen(true); }}>
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          </ToolbarButton>
+          <ToolbarButton label="Actualizar" disabled={isRefreshing} onClick={() => void refreshConversation()}>
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden="true" />
           </ToolbarButton>
         </div>
         <button
@@ -602,51 +557,25 @@ export function CaseReplyForm({
 
         {popover ? (
           <div className="absolute bottom-11 left-0 z-20 w-72 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white p-2 shadow-[var(--g66-shadow-soft)]">
-            {popover === "emoji" ? (
-              <div className="grid grid-cols-7 gap-1">
-                {frequentEmojis.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => {
-                      insertText(emoji);
-                      setPopover(null);
-                    }}
-                    className="h-8 rounded text-lg hover:bg-[var(--g66-background)]"
-                  >
-                    {emoji}
+            {popover === "quick-messages" ? (
+              <div className="grid max-h-64 gap-1 overflow-y-auto">
+                {isLoadingQuickMessages ? (
+                  <p className="px-2 py-3 text-xs text-[var(--g66-text-secondary)]">Cargando mensajes rápidos...</p>
+                ) : quickMessages.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-[var(--g66-text-secondary)]">No hay mensajes rápidos activos.</p>
+                ) : quickMessages.map((message) => (
+                  <button key={message.id} type="button" onClick={() => { insertText(message.content); setPopover(null); }} className="rounded border border-[var(--g66-border)] px-2 py-2 text-left hover:bg-[var(--g66-background)]">
+                    <span className="block text-xs font-bold text-[var(--g66-brand-blue)]">{message.title}</span>
+                    <span className="line-clamp-2 block text-[11px] font-semibold text-[var(--g66-text-secondary)]">{message.content}</span>
                   </button>
                 ))}
               </div>
             ) : null}
-            {popover === "sticker" ? (
+            {popover === "snooze" ? (
               <div className="grid gap-1">
-                {demoStickers.map((sticker) => (
-                  <button
-                    key={sticker.key}
-                    type="button"
-                    onClick={() => void selectDemoSticker(sticker)}
-                    className="rounded border border-[var(--g66-border)] px-2 py-2 text-left text-xs font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-background)]"
-                  >
-                    {sticker.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {popover === "template" ? (
-              <div className="grid gap-1">
-                {templates.map((template) => (
-                  <button
-                    key={template.label}
-                    type="button"
-                    onClick={() => {
-                      insertText(template.text);
-                      setPopover(null);
-                    }}
-                    className="rounded border border-[var(--g66-border)] px-2 py-2 text-left hover:bg-[var(--g66-background)]"
-                  >
-                    <span className="block text-xs font-bold text-[var(--g66-brand-blue)]">{template.label}</span>
-                    <span className="block text-[11px] font-semibold text-[var(--g66-text-secondary)]">{template.text}</span>
+                {[10, 20, 30].map((minutes) => (
+                  <button key={minutes} type="button" onClick={() => selectSnooze(minutes)} className="rounded border border-[var(--g66-border)] px-3 py-2 text-left text-xs font-semibold text-[var(--g66-text-primary)] hover:bg-[var(--g66-background)]">
+                    {minutes} minutos
                   </button>
                 ))}
               </div>
@@ -658,19 +587,62 @@ export function CaseReplyForm({
   );
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className={
-        compact
-          ? "bg-white px-3 py-2"
-          : "border-t border-[var(--g66-border)] bg-white p-4 sm:p-6"
-      }
-    >
-      <label htmlFor="case-reply" className="sr-only">
-        Responder como agente
-      </label>
-      {composer}
-      {error ? <p className="mt-1 truncate text-xs text-[var(--g66-danger)]">{error}</p> : null}
-    </form>
+    <>
+      <form
+        ref={formRef}
+        onSubmit={handleSubmit}
+        className={compact ? "bg-white px-3 py-2" : "border-t border-[var(--g66-border)] bg-white p-4 sm:p-6"}
+      >
+        <label htmlFor="case-reply" className="sr-only">Responder como agente</label>
+        {composer}
+        {error ? <p className="mt-1 truncate text-xs text-[var(--g66-danger)]">{error}</p> : null}
+      </form>
+
+      {isSettingsOpen ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="chat-settings-title">
+          <div className="w-full max-w-xl rounded-2xl border border-[var(--g66-border)] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--g66-border)] px-5 py-4">
+              <h2 id="chat-settings-title" className="text-base font-bold text-[var(--g66-text-primary)]">Configuración</h2>
+              <button type="button" onClick={() => setIsSettingsOpen(false)} aria-label="Cerrar configuración" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--g66-text-secondary)] hover:bg-[var(--g66-background)]">
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] space-y-3 overflow-y-auto p-5">
+              <details open className="rounded-xl border border-[var(--g66-border)] p-4">
+                <summary className="cursor-pointer text-sm font-bold text-[var(--g66-text-primary)]">Envío de Mensajes</summary>
+                <label className="mt-4 flex items-center justify-between gap-4 text-sm text-[var(--g66-text-secondary)]">
+                  Habilitar presionar ENTER para enviar mensajes
+                  <input type="checkbox" checked={settingsDraft.enter_to_send} onChange={(event) => setSettingsDraft((current) => ({ ...current, enter_to_send: event.target.checked }))} className="h-4 w-4 accent-[var(--g66-brand-blue)]" />
+                </label>
+              </details>
+              <details open className="rounded-xl border border-[var(--g66-border)] p-4">
+                <summary className="cursor-pointer text-sm font-bold text-[var(--g66-text-primary)]">Colores</summary>
+                <div className="mt-4 space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-[var(--g66-text-muted)]">Mis conversaciones</p>
+                    <ColorSettingRow label="Borde" value={settingsDraft.my_conversation_border_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, my_conversation_border_color: value }))} />
+                    <ColorSettingRow label="Texto" value={settingsDraft.my_conversation_text_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, my_conversation_text_color: value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-[var(--g66-text-muted)]">Mis notas</p>
+                    <ColorSettingRow label="Borde" value={settingsDraft.my_notes_border_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, my_notes_border_color: value }))} />
+                    <ColorSettingRow label="Texto" value={settingsDraft.my_notes_text_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, my_notes_text_color: value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-[var(--g66-text-muted)]">Conversación del Cliente</p>
+                    <ColorSettingRow label="Borde" value={settingsDraft.customer_conversation_border_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, customer_conversation_border_color: value }))} />
+                    <ColorSettingRow label="Texto" value={settingsDraft.customer_conversation_text_color} onChange={(value) => setSettingsDraft((current) => ({ ...current, customer_conversation_text_color: value }))} />
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[var(--g66-border)] px-5 py-4">
+              <button type="button" onClick={() => setIsSettingsOpen(false)} className="h-9 rounded-lg border border-[var(--g66-border)] px-4 text-sm font-semibold text-[var(--g66-text-secondary)]">Salir</button>
+              <button type="button" disabled={isSavingSettings} onClick={() => void saveChatSettings()} className="h-9 rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-bold text-white disabled:opacity-60">{isSavingSettings ? "Guardando..." : "Guardar Cambios"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
