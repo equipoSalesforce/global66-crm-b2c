@@ -111,6 +111,28 @@ export function extractAircallCallId(payload: unknown) {
   return firstString(call, [["id"], ["call_id"], ["uuid"], ["aircall_call_id"]]);
 }
 
+export function extractAircallCaseId(payload: unknown) {
+  const call = getCallData(payload);
+
+  return (
+    firstString(call, [
+      ["case_id"],
+      ["caseId"],
+      ["metadata", "case_id"],
+      ["metadata", "caseId"],
+      ["context", "case_id"],
+      ["context", "caseId"],
+      ["custom_fields", "case_id"],
+    ]) ??
+    firstString(payload, [
+      ["case_id"],
+      ["caseId"],
+      ["metadata", "case_id"],
+      ["metadata", "caseId"],
+    ])
+  );
+}
+
 export function extractAircallUserId(payload: unknown) {
   const user = getUserData(payload);
   const call = getCallData(payload);

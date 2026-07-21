@@ -18,9 +18,13 @@ import {
 import {
   computeCaseSla,
   formatDuration,
-  getFrtSlaState,
   type CaseNotificationStatus,
 } from "@/lib/case-sla";
+import { computeCaseInfoSla } from "@/lib/case-sla-service";
+import type {
+  CaseCallRecord,
+  CaseInfoLinkView,
+} from "@/lib/case-info-links-types";
 import {
   buildCustomValuePayload,
   getCustomValueForField,
@@ -82,6 +86,11 @@ import {
 import { CaseReplyForm } from "./case-reply-form";
 import { CaseEmailComposer } from "./cases/case-email-composer";
 import { AircallPhoneWidget } from "./aircall-phone-widget";
+import { CaseCallsSection } from "./cases/case-calls-section";
+import { CaseInfoLinksPanel } from "./cases/case-info-links-panel";
+import { CaseQaNotesSection } from "./cases/case-qa-notes-section";
+import { CaseRelatedCasesSection } from "./cases/case-related-cases-section";
+import { CaseSlaSection } from "./cases/case-sla-section";
 import {
   CaseAssignmentModal,
   DuplicateCaseModal,
@@ -242,35 +251,6 @@ export type ConsoleAgentRecord = {
   email: string | null;
 };
 
-type AircallCallRecord = {
-  id: string;
-  aircall_call_id: string;
-  case_id: string | null;
-  customer_id: string | null;
-  crm_user_id: string | null;
-  aircall_user_id: string | null;
-  aircall_user_name: string | null;
-  aircall_user_email: string | null;
-  direction: string | null;
-  phone_number: string | null;
-  customer_phone: string | null;
-  aircall_number_id: string | null;
-  aircall_number: string | null;
-  status: string | null;
-  result: string | null;
-  started_at: string | null;
-  answered_at: string | null;
-  ended_at: string | null;
-  duration_seconds: number | null;
-  recording_url: string | null;
-  asset_url: string | null;
-  voicemail_url: string | null;
-  tags: unknown;
-  notes: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
 type MessageAttachmentRecord = {
   id: string;
   message_id: string | number | null;
@@ -300,7 +280,6 @@ type ViewKey =
   | `saved:${string}`;
 type WorkTab = "whatsapp" | "ticket" | "ai" | "activity" | "history" | "form";
 type TicketTab = "publish" | "details" | "activity" | "history" | `layout:${string}`;
-type RelatedView = "cases" | "qa" | "email" | "ai" | "history" | "activity" | "sla" | "aircall" | null;
 type PendingAction =
   | "status"
   | "close"
@@ -791,7 +770,7 @@ function AuditEventCard({
   );
 }
 
-function getAircallCallTitle(call: AircallCallRecord) {
+function getAircallCallTitle(call: CaseCallRecord) {
   const direction = call.direction?.toLowerCase();
 
   if (direction === "inbound") return "Llamada entrante";
@@ -806,7 +785,7 @@ function getAircallDurationLabel(seconds: number | null) {
   return formatDuration(seconds);
 }
 
-function AircallCallCard({ call }: { call: AircallCallRecord }) {
+function AircallCallCard({ call }: { call: CaseCallRecord }) {
   const tags = Array.isArray(call.tags)
     ? call.tags
         .map((tag) => {
@@ -1915,7 +1894,7 @@ export function CasesConsole({
   const [areaLayoutTab, setAreaLayoutTab] = useState<CaseLayoutTabWithSections | null>(null);
   const [customValues, setCustomValues] = useState<CaseCustomValue[]>([]);
   const [auditEvents, setAuditEvents] = useState<CaseAuditEvent[]>([]);
-  const [aircallCalls, setAircallCalls] = useState<AircallCallRecord[]>([]);
+  const [aircallCalls, setAircallCalls] = useState<CaseCallRecord[]>([]);
   const [aiHistoryPayload, setAiHistoryPayload] =
     useState<CaseAiHistoryResponse | null>(null);
   const [isAiHistoryLoading, setIsAiHistoryLoading] = useState(false);
@@ -1933,7 +1912,7 @@ export function CasesConsole({
     WhatsappNotificationCase[]
   >([]);
   const [whatsappPendingCount, setWhatsappPendingCount] = useState(0);
-  const [relatedView, setRelatedView] = useState<RelatedView>(null);
+  const [relatedView, setRelatedView] = useState<CaseInfoLinkView | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -2032,7 +2011,7 @@ export function CasesConsole({
       .eq("case_id", caseId)
       .order("started_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
-      .returns<AircallCallRecord[]>();
+      .returns<CaseCallRecord[]>();
 
     if (error) {
       console.error("[aircall] Error loading calls", {
@@ -2180,7 +2159,11 @@ export function CasesConsole({
   }, [selectedCaseId]);
 
   useEffect(() => {
-    if (workTab !== "ai" || !selectedCaseId || !canViewAiCaseSummary) return;
+    if (
+      (workTab !== "ai" && relatedView !== "ai") ||
+      !selectedCaseId ||
+      !canViewAiCaseSummary
+    ) return;
 
     const timeoutId = window.setTimeout(() => {
       void loadAiHistorySummary(selectedCaseId);
@@ -2189,7 +2172,7 @@ export function CasesConsole({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [canViewAiCaseSummary, loadAiHistorySummary, selectedCaseId, workTab]);
+  }, [canViewAiCaseSummary, loadAiHistorySummary, relatedView, selectedCaseId, workTab]);
 
   useEffect(() => {
     if (!selectedCaseId) return;
@@ -2854,6 +2837,7 @@ export function CasesConsole({
 
     return !channel || channel === "WHATSAPP" || channel === "AI";
   });
+  const selectedEmailMessages = selectedCaseMessages.filter(isEmailMessage);
   const normalizedWhatsappSearchQuery = whatsappSearchQuery.trim().toLocaleLowerCase();
   const whatsappSearchMatches = normalizedWhatsappSearchQuery
     ? selectedWhatsappMessages.filter((message) =>
@@ -2877,6 +2861,9 @@ export function CasesConsole({
   const selectedDaysWithoutOperation = getDaysWithoutOperation(selectedLastActivity);
   const selectedCaseSla = selectedCase
     ? computeCaseSla(selectedCase, selectedCaseMessages)
+    : null;
+  const selectedCaseInfoSla = selectedCase
+    ? computeCaseInfoSla(selectedCase, selectedCaseMessages, auditEvents)
     : null;
   const selectedLifecycleStatus = selectedCase
     ? normalizeLifecycleStatus(selectedCase.lifecycle_status, selectedCase.status)
@@ -4818,7 +4805,7 @@ export function CasesConsole({
                       : []),
                     {
                       key: "activity",
-                      label: "Actividad",
+                      label: "Actividades",
                       icon: <Activity className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
                     {
@@ -5559,20 +5546,16 @@ export function CasesConsole({
                       label: "Correos",
                       icon: <Mail className="h-3.5 w-3.5" aria-hidden="true" />,
                     },
-                    ...(canViewCallHistory
-                      ? [
-                          {
-                            key: "aircall",
-                            label: "Aircall",
-                            icon: (
-                              <PhoneCall
-                                className="h-3.5 w-3.5"
-                                aria-hidden="true"
-                              />
-                            ),
-                          },
-                        ]
-                      : []),
+                    {
+                      key: "calls",
+                      label: "Llamados",
+                      icon: (
+                        <PhoneCall
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
+                      ),
+                    },
                     {
                       key: "sla",
                       label: "SLA",
@@ -5583,7 +5566,7 @@ export function CasesConsole({
                       key={item.key}
                       type="button"
                       onClick={() =>
-                        setRelatedView(item.key as Exclude<RelatedView, null>)
+                        setRelatedView(item.key as CaseInfoLinkView)
                       }
                       className="flex h-7 items-center justify-between rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-white px-2 text-[10px] font-semibold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
@@ -5683,170 +5666,68 @@ export function CasesConsole({
       {canUseAircall ? <AircallPhoneWidget /> : null}
 
       {relatedView && selectedCase ? (
-        <div className="absolute inset-y-0 right-0 z-30 w-96 border-l border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-soft)]">
-          <div className="flex h-12 items-center justify-between border-b border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-4">
-            <h2 className="text-sm font-black text-[var(--g66-text-primary)]">
-              {relatedView === "ai"
-                ? "IA"
-                : relatedView === "cases"
-                  ? "Casos"
-                  : relatedView === "qa"
-                    ? "Notas QA"
-                    : relatedView === "email"
-                      ? "Correos"
-                : relatedView === "history"
-                  ? "Historial"
-                  : relatedView === "activity"
-                    ? "Actividad"
-                    : relatedView === "aircall"
-                      ? "Aircall"
-                      : "SLA"}
-            </h2>
-            <button
-              type="button"
-              onClick={() => setRelatedView(null)}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-xs font-bold text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
-            >
-              ×
-            </button>
-          </div>
-          <div className="grid gap-3 p-3">
+        <CaseInfoLinksPanel view={relatedView} onClose={() => setRelatedView(null)}>
+          <div className="grid gap-3">
             {relatedView === "cases" ? (
-              <div className="grid gap-2">
-                {caseItems.filter((caseItem) => selectedCase.customer_id && caseItem.customer_id === selectedCase.customer_id).map((caseItem) => (
-                  <Link key={`related-case-${caseItem.id}`} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border)] p-3 text-sm font-bold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]">
-                    {formatCaseNumber(caseItem.case_number, caseItem.id)} · {caseItem.subject || "Sin asunto"}
-                  </Link>
-                ))}
-              </div>
+              <CaseRelatedCasesSection caseId={selectedCase.id} />
             ) : null}
-            {relatedView === "qa" ? (
-              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay notas QA asociadas.</p>
-            ) : null}
+            {relatedView === "qa" ? <CaseQaNotesSection /> : null}
             {relatedView === "email" ? (
               <div className="grid gap-2">
-                {selectedCaseMessages.filter(isEmailMessage).map((message) => (
-                  <button key={`related-email-${message.id}`} type="button" onClick={() => setSelectedEmailMessage(message)} className="rounded-md border border-[var(--g66-border)] p-3 text-left text-sm font-bold text-[var(--g66-brand-blue)]">
-                    {message.email_subject || "Email sin asunto"}
+                {selectedEmailMessages.map((message) => (
+                  <button key={`related-email-${message.id}`} type="button" onClick={() => setSelectedEmailMessage(message)} className="rounded-lg border border-[var(--g66-border)] bg-white p-3 text-left transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]">
+                    <span className="block truncate text-xs font-semibold text-[var(--g66-brand-blue)]">{message.email_subject || "Email sin asunto"}</span>
+                    <span className="mt-1 block truncate text-[10px] text-[var(--g66-text-secondary)]">De: {message.email_from || "Sin remitente"}</span>
+                    <span className="block truncate text-[10px] text-[var(--g66-text-secondary)]">Para: {message.email_to || "Sin destinatario"}</span>
+                    <span className="mt-1 line-clamp-2 block text-[11px] text-[var(--g66-text-secondary)]">{message.body || message.email_text_body || "Sin contenido"}</span>
+                    <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--g66-text-muted)]"><span>{formatDateTime(message.created_at)}</span><span>{message.delivery_status || "Sin estado"}</span></span>
                   </button>
                 ))}
-                {selectedCaseMessages.filter(isEmailMessage).length === 0 ? <p className="rounded-md border border-dashed p-3 text-sm text-[var(--g66-text-secondary)]">No hay correos asociados.</p> : null}
+                {selectedEmailMessages.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay correos asociados a este caso.</p> : null}
               </div>
             ) : null}
             {relatedView === "ai" ? (
-              <>
-                <Field label="Resumen IA" value={selectedCase.ai_summary || "Sin resumen IA"} />
-                <Field label="AI Category" value={selectedCase.ai_category || "Sin categoría IA"} />
-                <Field label="AI Sentiment" value={selectedCase.ai_sentiment || "Sin sentimiento IA"} />
-                <Field label="AI Resolution" value={selectedCase.ai_resolution || "Sin resolución IA"} />
-                <Field
-                  label="AI Confidence"
-                  value={
-                    selectedCase.ai_confidence === null ||
-                    selectedCase.ai_confidence === undefined
-                      ? "Sin confianza IA"
-                      : `${Math.round(selectedCase.ai_confidence * 100)}%`
-                  }
-                />
-              </>
+              selectedCase.ai_summary || aiHistoryPayload?.cachedSummary ? (
+                <div className="grid gap-3">
+                  <section className="rounded-lg border border-[var(--g66-border)] bg-white p-3">
+                    <h3 className="text-xs font-semibold text-[var(--g66-text-primary)]">Resumen IA del caso</h3>
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[var(--g66-text-secondary)]">{aiHistoryPayload?.cachedSummary?.summary || selectedCase.ai_summary}</p>
+                  </section>
+                  {aiHistoryPayload?.cachedSummary?.patterns?.length ? (
+                    <section className="rounded-lg border border-[var(--g66-border)] bg-white p-3"><h3 className="text-xs font-semibold text-[var(--g66-text-primary)]">Análisis e insights</h3><ul className="mt-2 grid gap-1 text-xs text-[var(--g66-text-secondary)]">{aiHistoryPayload.cachedSummary.patterns.map((pattern) => <li key={pattern}>• {pattern}</li>)}</ul></section>
+                  ) : null}
+                  {aiHistoryPayload?.cachedSummary?.next_best_action ? <Field label="Sugerencia" value={aiHistoryPayload.cachedSummary.next_best_action} /> : null}
+                  <Field label="Categoría IA" value={selectedCase.ai_category || "No disponible"} />
+                  <Field label="Sentimiento" value={selectedCase.ai_sentiment || aiHistoryPayload?.cachedSummary?.sentiment || "No disponible"} />
+                  <Field label="Resolución IA" value={selectedCase.ai_resolution || "No disponible"} />
+                  <Field label="Última actualización IA" value={formatDateTime(aiHistoryPayload?.cachedSummary?.generated_at || aiHistoryPayload?.cachedSummary?.updated_at)} />
+                  {aiHistoryPayload?.historicalCases?.length ? <Field label="Interacciones IA relacionadas" value={`${aiHistoryPayload.historicalCases.length} casos históricos relacionados`} /> : null}
+                </div>
+              ) : (
+                <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">{isAiHistoryLoading ? "Cargando análisis IA..." : "No hay análisis IA disponible para este caso."}</p>
+              )
             ) : null}
             {relatedView === "history" ? (
-              <>
+              <div className="grid gap-2">
                 <Field label="Caso creado" value={formatDateTime(selectedCase.created_at)} />
                 <Field label="Última actualización" value={formatDateTime(selectedCase.updated_at)} />
                 <Field label="Caso cerrado" value={formatDateTime(selectedCase.closed_at)} />
-                <div className="grid gap-2">
-                  {auditEvents.length > 0 ? (
-                    auditEvents.slice(0, 10).map((event) => (
-                      <AuditEventCard
-                        key={`related-history-audit-${event.id}`}
-                        event={event}
-                        agentNames={agentNames}
-                      />
-                    ))
-                  ) : (
-                    <div className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                      No hay historial detallado de cambios para este caso todavía.
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : null}
-            {relatedView === "activity" ? (
-              <>
-                <Field label="Estado del caso" value={selectedLifecycleStatus} />
-                <Field label="Estado de atención" value={selectedRoutingStatus} />
-                <Field label="Agente asignado" value={getAgentLabel(selectedCase, agentNames)} />
-                <Field label="Último mensaje" value={getMessagePreview(selectedLatestMessage)} />
-                {auditEvents.slice(0, 5).map((event) => (
-                  <AuditEventCard
-                    key={`related-activity-audit-${event.id}`}
-                    event={event}
-                    agentNames={agentNames}
-                  />
-                ))}
-                {canViewCallHistory && aircallCalls.slice(0, 5).map((call) => (
-                  <AircallCallCard key={`related-activity-aircall-${call.id}`} call={call} />
-                ))}
-              </>
-            ) : null}
-            {relatedView === "aircall" ? (
-              <div className="grid gap-2">
-                {aircallCalls.length > 0 ? (
-                  aircallCalls.map((call) => (
-                    <AircallCallCard key={`related-aircall-${call.id}`} call={call} />
-                  ))
-                ) : (
-                  <div className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                    No hay llamadas Aircall registradas para este caso.
-                  </div>
-                )}
+                {auditEvents.map((event) => <AuditEventCard key={`related-history-audit-${event.id}`} event={event} agentNames={agentNames} />)}
+                {auditEvents.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay eventos de historial para este caso.</p> : null}
               </div>
             ) : null}
-            {relatedView === "sla" && selectedCaseSla ? (
-              <>
-                <Field
-                  label="FRT"
-                  value={
-                    selectedCaseSla.firstAgentResponseAt
-                      ? formatDuration(selectedCaseSla.frtSeconds)
-                      : `Pendiente · ${formatDuration(selectedCaseSla.frtSeconds)}`
-                  }
-                />
-                <Field
-                  label="AHT Total"
-                  value={formatDuration(selectedCaseSla.ahtTotalSeconds)}
-                />
-                <Field
-                  label="AHT Ejecutivo"
-                  value={formatDuration(selectedCaseSla.ahtAgentSeconds)}
-                />
-                <Field
-                  label="TTC"
-                  value={
-                    selectedCaseSla.ttcSeconds === null
-                      ? "En curso"
-                      : formatDuration(selectedCaseSla.ttcSeconds)
-                  }
-                />
-                <Field
-                  label="Estado SLA"
-                  value={
-                    getFrtSlaState(
-                      selectedCaseSla.frtSeconds,
-                      Boolean(selectedCaseSla.firstAgentResponseAt),
-                    ) === "Breached"
-                      ? "Vencido"
-                      : getFrtSlaState(
-                          selectedCaseSla.frtSeconds,
-                          Boolean(selectedCaseSla.firstAgentResponseAt),
-                        )
-                  }
-                />
-              </>
+            {relatedView === "activity" ? (
+              <div className="grid gap-2">
+                {selectedCaseMessages.map((message) => <article key={`related-activity-message-${message.id}`} className="rounded-lg border border-[var(--g66-border)] bg-white p-3"><div className="flex items-start justify-between gap-2"><p className="text-xs font-semibold text-[var(--g66-text-primary)]">{isEmailMessage(message) ? getEmailTitle(message) : message.sender_type || message.direction || "Interacción"}</p><span className="text-[10px] text-[var(--g66-text-muted)]">{formatDateTime(message.created_at)}</span></div><p className="mt-1 line-clamp-2 text-xs text-[var(--g66-text-secondary)]">{message.body || "Sin contenido"}</p></article>)}
+                {auditEvents.map((event) => <AuditEventCard key={`related-activity-audit-${event.id}`} event={event} agentNames={agentNames} />)}
+                {canViewCallHistory ? aircallCalls.map((call) => <AircallCallCard key={`related-activity-call-${call.id}`} call={call} />) : null}
+                {selectedCaseMessages.length === 0 && auditEvents.length === 0 && (!canViewCallHistory || aircallCalls.length === 0) ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay actividad registrada para este caso.</p> : null}
+              </div>
             ) : null}
+            {relatedView === "calls" ? <CaseCallsSection calls={aircallCalls} /> : null}
+            {relatedView === "sla" && selectedCaseInfoSla ? <CaseSlaSection summary={selectedCaseInfoSla} /> : null}
           </div>
-        </div>
+        </CaseInfoLinksPanel>
       ) : null}
 
       {isAssignmentModalOpen && selectedCase ? (

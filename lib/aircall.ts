@@ -42,10 +42,24 @@ export function aircallPhoneMatches(
   left: string | null | undefined,
   right: string | null | undefined,
 ) {
-  const normalizedLeft = normalizeAircallPhone(left);
-  const normalizedRight = normalizeAircallPhone(right);
+  const normalizedLeft = (left ?? "").replace(/\D/g, "");
+  const normalizedRight = (right ?? "").replace(/\D/g, "");
 
-  return Boolean(normalizedLeft && normalizedLeft === normalizedRight);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+
+  const localComparisonLength = 9;
+  if (
+    normalizedLeft.length < localComparisonLength ||
+    normalizedRight.length < localComparisonLength
+  ) {
+    return false;
+  }
+
+  return (
+    normalizedLeft.slice(-localComparisonLength) ===
+    normalizedRight.slice(-localComparisonLength)
+  );
 }
 
 export function getAircallDialErrorMessage(error: unknown) {
