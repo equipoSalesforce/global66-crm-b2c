@@ -1,7 +1,10 @@
 import "server-only";
 
 import { authorizeCaseAction } from "@/lib/case-action-authorization";
+import { getCaseAssignmentAuthorization } from "@/lib/case-assignment-authorization";
 import { createCaseAuditEvent } from "@/lib/case-audit";
+import { getCurrentCrmUser } from "@/lib/current-crm-user";
+import type { CrmRolePermissionRecord } from "@/lib/permissions";
 import type {
   CaseAssignmentOptionsResponse,
   CaseAssignmentResult,
@@ -118,7 +121,7 @@ export async function assignCaseOwner(input: {
   assignedQueueId?: string | null;
   notify?: boolean;
 }): Promise<CaseAssignmentResult> {
-  const { actor } = await authorizeCaseAction("takeQueueCases");
+  const { actor } = await authorizeCaseAction("viewCases");
   if (!(["USER", "QUEUE"] as const).includes(input.ownerType)) {
     throw new Error("El tipo de owner debe ser USER o QUEUE.");
   }
@@ -130,6 +133,27 @@ export async function assignCaseOwner(input: {
   }
 
   const existing = await getCase(input.caseId);
+  const [currentUser, permissionsResult] = await Promise.all([
+    getCurrentCrmUser(),
+    supabase
+      .from("crm_role_permissions")
+      .select("role, permission_key, enabled")
+      .returns<CrmRolePermissionRecord[]>(),
+  ]);
+  if (permissionsResult.error) throw permissionsResult.error;
+
+  const assignmentAuthorization = getCaseAssignmentAuthorization({
+    ownerType: existing.owner_type,
+    assignedAgentId: existing.assigned_agent_id,
+    assignedQueueId: existing.assigned_queue_id,
+    actorUserId: currentUser.id,
+    actorRole: currentUser.role,
+    configuredPermissions: permissionsResult.data ?? [],
+  });
+  if (!assignmentAuthorization.allowed) {
+    throw new Error(assignmentAuthorization.reason ?? "No tienes permiso para asignar este caso.");
+  }
+
   const now = new Date().toISOString();
   let owner: ResolvedCaseOwner;
 

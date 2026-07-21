@@ -16,11 +16,11 @@ import {
   type LifecycleStatus,
 } from "@/lib/case-status";
 import {
-  computeCaseSla,
   formatDuration,
   type CaseNotificationStatus,
 } from "@/lib/case-sla";
 import { computeCaseInfoSla } from "@/lib/case-sla-service";
+import { getCaseAssignmentAuthorization } from "@/lib/case-assignment-authorization";
 import type {
   CaseCallRecord,
   CaseInfoLinkView,
@@ -87,7 +87,14 @@ import { CaseReplyForm } from "./case-reply-form";
 import { CaseEmailComposer } from "./cases/case-email-composer";
 import { AircallPhoneWidget } from "./aircall-phone-widget";
 import { CaseCallsSection } from "./cases/case-calls-section";
+import { CaseAttentionTime } from "./cases/case-attention-time";
 import { CaseInfoLinksPanel } from "./cases/case-info-links-panel";
+import {
+  CaseMacroModal,
+  type CaseMacro,
+  type CaseMacroAction,
+} from "./cases/case-macro-modal";
+import { CasePriorityIndicator } from "./cases/case-priority-indicator";
 import { CaseQaNotesSection } from "./cases/case-qa-notes-section";
 import { CaseRelatedCasesSection } from "./cases/case-related-cases-section";
 import { CaseSlaSection } from "./cases/case-sla-section";
@@ -125,6 +132,7 @@ export type ConsoleCaseRecord = {
   created_at: string | null;
   updated_at: string | null;
   closed_at?: string | null;
+  resolved_at?: string | null;
   resolution_type?: string | null;
   ai_summary?: string | null;
   ai_category?: string | null;
@@ -376,20 +384,6 @@ type CaseAiHistoryResponse = {
   metrics?: CaseAiHistoryMetrics;
 };
 
-type ActiveMacroActionRecord = {
-  id: string;
-  action_type: string;
-  sort_order: number | null;
-  payload: Record<string, unknown>;
-};
-
-type ActiveMacroRecord = {
-  id: string;
-  name: string;
-  description: string | null;
-  macro_actions?: ActiveMacroActionRecord[] | null;
-};
-
 type MacroRunResponse = {
   ok?: boolean;
   status?: string;
@@ -614,16 +608,6 @@ function HeaderMetadataItem({
   );
 }
 
-function formatAttentionDuration(seconds: number | null | undefined) {
-  const safeSeconds = Math.max(0, Math.floor(seconds ?? 0));
-  const totalMinutes = Math.floor(safeSeconds / 60);
-  const days = Math.floor(totalMinutes / (24 * 60));
-  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-  const minutes = totalMinutes % 60;
-
-  return `${days} ${days === 1 ? "día" : "días"} ${hours} ${hours === 1 ? "hora" : "horas"} ${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
-}
-
 function getHeaderChannelLabel(channel: string | null | undefined) {
   const normalized = channel?.trim().toUpperCase();
 
@@ -632,16 +616,6 @@ function getHeaderChannelLabel(channel: string | null | undefined) {
   if (normalized === "AIRCALL" || normalized === "PHONE") return "Teléfono";
 
   return channel?.trim() || "Sin canal";
-}
-
-function getPriorityLabel(priority: string | null | undefined) {
-  const normalized = priority?.trim().toUpperCase();
-
-  if (normalized === "HIGH" || normalized === "URGENT") return "Alto 🚩";
-  if (normalized === "MEDIUM") return "Medio";
-  if (normalized === "LOW") return "Bajo";
-
-  return priority?.trim() || "Sin prioridad";
 }
 
 function getAuditValueLabel(value: string | null | undefined) {
@@ -1341,7 +1315,7 @@ function getEmailTitle(message: ConsoleMessageRecord) {
     : "Correo recibido del cliente";
 }
 
-function getMacroActionSummary(action: ActiveMacroActionRecord) {
+function getMacroActionSummary(action: CaseMacroAction) {
   if (action.action_type === "UPDATE_CASE_FIELDS") {
     const fields = Object.entries(action.payload ?? {})
       .filter(([, value]) => value !== null && value !== undefined && value !== "")
@@ -1834,6 +1808,7 @@ export function CasesConsole({
   cases,
   messages,
   agents,
+  currentUser,
   rolePermissions = [],
   caseFieldPermissions = [],
   initialSelectedCaseId,
@@ -1841,6 +1816,7 @@ export function CasesConsole({
   cases: ConsoleCaseRecord[];
   messages: ConsoleMessageRecord[];
   agents: ConsoleAgentRecord[];
+  currentUser: { id: string; role: string };
   rolePermissions?: CrmRolePermissionRecord[];
   caseFieldPermissions?: CrmCaseFieldPermissionRecord[];
   initialSelectedCaseId?: string;
@@ -1903,8 +1879,10 @@ export function CasesConsole({
   const [customFieldErrors, setCustomFieldErrors] = useState<Record<string, string>>(
     {},
   );
-  const [activeMacros, setActiveMacros] = useState<ActiveMacroRecord[]>([]);
+  const [activeMacros, setActiveMacros] = useState<CaseMacro[]>([]);
   const [selectedMacroId, setSelectedMacroId] = useState("");
+  const [macroSearchQuery, setMacroSearchQuery] = useState("");
+  const [recentMacroIds, setRecentMacroIds] = useState<string[]>([]);
   const [isMacroModalOpen, setIsMacroModalOpen] = useState(false);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
@@ -2135,22 +2113,6 @@ export function CasesConsole({
       setIsAiHistoryGenerating(false);
     }
   }, [agentSession.id, selectedCaseId, toast]);
-
-  useEffect(() => {
-    function handleGlobalSearch(event: Event) {
-      const nextValue =
-        event instanceof CustomEvent && typeof event.detail === "string"
-          ? event.detail
-          : "";
-      setQuery(nextValue);
-    }
-
-    window.addEventListener("cases-global-search", handleGlobalSearch);
-
-    return () => {
-      window.removeEventListener("cases-global-search", handleGlobalSearch);
-    };
-  }, []);
 
   useEffect(() => {
     if (selectedCaseId) {
@@ -2859,12 +2821,19 @@ export function CasesConsole({
     ? getLastActivity(selectedCase, selectedLatestMessage)
     : null;
   const selectedDaysWithoutOperation = getDaysWithoutOperation(selectedLastActivity);
-  const selectedCaseSla = selectedCase
-    ? computeCaseSla(selectedCase, selectedCaseMessages)
-    : null;
   const selectedCaseInfoSla = selectedCase
     ? computeCaseInfoSla(selectedCase, selectedCaseMessages, auditEvents)
     : null;
+  const selectedCaseAssignmentAuthorization = selectedCase
+    ? getCaseAssignmentAuthorization({
+        ownerType: selectedCase.owner_type,
+        assignedAgentId: selectedCase.assigned_agent_id,
+        assignedQueueId: selectedCase.assigned_queue_id,
+        actorUserId: currentUser.id,
+        actorRole: currentUser.role,
+        configuredPermissions: rolePermissions,
+      })
+    : { allowed: false, reason: null, basis: "OTHER_AGENT" as const };
   const selectedLifecycleStatus = selectedCase
     ? normalizeLifecycleStatus(selectedCase.lifecycle_status, selectedCase.status)
     : "NEW";
@@ -2899,9 +2868,6 @@ export function CasesConsole({
         : isRightPanelOpen
           ? `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[259.2px_minmax(0,1fr)_259.2px]`
           : `${originalStyles.detailBody} grid min-h-0 flex-1 items-stretch xl:grid-cols-[259.2px_minmax(0,1fr)_27px]`;
-  const selectedMacro =
-    activeMacros.find((macro) => macro.id === selectedMacroId) ?? null;
-
   const updateWhatsappScrollPosition = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
@@ -3405,18 +3371,22 @@ export function CasesConsole({
       .eq("target_object", "CASE")
       .eq("is_active", true)
       .order("name", { ascending: true })
-      .returns<ActiveMacroRecord[]>();
+      .returns<CaseMacro[]>();
 
     if (error) throw new Error(error.message);
 
     const macros = data ?? [];
     setActiveMacros(macros);
-    setSelectedMacroId((currentMacroId) => currentMacroId || macros[0]?.id || "");
+    setSelectedMacroId((currentMacroId) =>
+      macros.some((macro) => macro.id === currentMacroId) ? currentMacroId : "",
+    );
   }
 
   async function openMacroModal() {
     if (!canExecuteMacros) return;
 
+    setMacroSearchQuery("");
+    setSelectedMacroId("");
     setIsMacroModalOpen(true);
     try {
       await loadActiveMacros();
@@ -3456,6 +3426,10 @@ export function CasesConsole({
       await refreshCaseMessages(selectedCase.id);
       await refreshCaseAttachments(selectedCase.id);
       await refreshWhatsappNotifications();
+      setRecentMacroIds((currentIds) => [
+        selectedMacroId,
+        ...currentIds.filter((macroId) => macroId !== selectedMacroId),
+      ].slice(0, 5));
       setIsMacroModalOpen(false);
       toast.success(
         payload.ok
@@ -4061,7 +4035,14 @@ export function CasesConsole({
               </span>
               <span className={`${originalStyles.headerBadge} ${originalStyles.attentionBadge} inline-flex items-center`}>
                 <span className={`${originalStyles.headerBadgeLabel} uppercase text-[var(--g66-text-muted)]`}>Tiempo atención</span>
-                {formatAttentionDuration(selectedCaseSla?.ahtTotalSeconds)}
+                <CaseAttentionTime
+                  createdAt={selectedCase.created_at}
+                  closedAt={selectedCase.closed_at}
+                  resolvedAt={selectedCase.resolved_at}
+                  updatedAt={selectedCase.updated_at}
+                  status={selectedCase.status}
+                  lifecycleStatus={selectedCase.lifecycle_status}
+                />
               </span>
             </div>
 
@@ -4086,9 +4067,17 @@ export function CasesConsole({
               ) : null}
               <button
                 type="button"
-                disabled={!canTakeCases || pendingAction !== null}
-                onClick={() => setIsAssignmentModalOpen(true)}
-                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-muted)]`}
+                disabled={pendingAction !== null}
+                aria-disabled={!selectedCaseAssignmentAuthorization.allowed}
+                onClick={() => {
+                  if (!selectedCaseAssignmentAuthorization.allowed) {
+                    toast.error(selectedCaseAssignmentAuthorization.reason ?? "No tienes permiso para asignar este caso.");
+                    return;
+                  }
+                  setIsAssignmentModalOpen(true);
+                }}
+                title={selectedCaseAssignmentAuthorization.reason ?? "Asignar caso"}
+                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[var(--g66-border)] bg-white text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] disabled:cursor-not-allowed disabled:text-[var(--g66-text-muted)] ${selectedCaseAssignmentAuthorization.allowed ? "" : "cursor-not-allowed opacity-60"}`}
               >
                 <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
                 Asignar
@@ -4128,7 +4117,7 @@ export function CasesConsole({
                       ? "Sin owner"
                       : getAgentLabel(selectedCase, agentNames)}
                 </span>
-                {canTakeCases ? (
+                {selectedCaseAssignmentAuthorization.allowed ? (
                   <button
                     type="button"
                     onClick={() => setIsAssignmentModalOpen(true)}
@@ -4163,16 +4152,7 @@ export function CasesConsole({
                 </span>
               </HeaderMetadataItem>
               <HeaderMetadataItem label="Prioridad">
-                <span
-                  className={
-                    selectedCase.priority?.toUpperCase() === "HIGH" ||
-                    selectedCase.priority?.toUpperCase() === "URGENT"
-                      ? "text-[var(--g66-danger)]"
-                      : ""
-                  }
-                >
-                  {getPriorityLabel(selectedCase.priority)}
-                </span>
+                <CasePriorityIndicator priority={selectedCase.priority} />
               </HeaderMetadataItem>
           </div>
         </header>
@@ -5761,101 +5741,18 @@ export function CasesConsole({
       ) : null}
 
       {isMacroModalOpen ? (
-        <div className="absolute inset-0 z-40 bg-black/20">
-          <div className="absolute right-4 top-16 flex w-[min(520px,92vw)] flex-col rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white shadow-[var(--g66-shadow-soft)]">
-            <div className="flex h-12 items-center justify-between border-b border-[var(--g66-border-soft)] bg-[var(--g66-surface-soft)] px-4">
-              <h2 className="text-sm font-black text-[var(--g66-text-primary)]">
-                Ejecutar macro
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsMacroModalOpen(false)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--g66-border)] bg-white text-xs font-bold text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
-              >
-                ×
-              </button>
-            </div>
-            <div className="grid gap-3 p-3">
-              {activeMacros.length > 0 ? (
-                <>
-                  <label className="grid gap-1 text-sm font-semibold text-[var(--g66-text-primary)]">
-                    Macro activa
-                    <select
-                      value={selectedMacroId}
-                      onChange={(event) => setSelectedMacroId(event.target.value)}
-                      className="h-9 rounded-md border border-[var(--g66-border)] bg-white px-3 text-sm outline-none focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
-                    >
-                      {activeMacros.map((macro) => (
-                        <option key={macro.id} value={macro.id}>
-                          {macro.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {selectedMacro?.description ? (
-                    <p className="rounded-md bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                      {selectedMacro.description}
-                    </p>
-                  ) : null}
-                  <div className="rounded-md border border-[var(--g66-border)]">
-                    <div className="border-b border-[var(--g66-border)] bg-[var(--g66-background)] px-3 py-2">
-                      <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--g66-text-secondary)]">
-                        Resumen de acciones
-                      </h3>
-                    </div>
-                    <ol className="divide-y divide-[var(--g66-border)]">
-                      {(selectedMacro?.macro_actions ?? [])
-                        .slice()
-                        .sort(
-                          (actionA, actionB) =>
-                            (actionA.sort_order ?? 0) -
-                            (actionB.sort_order ?? 0),
-                        )
-                        .map((action, index) => (
-                          <li
-                            key={action.id}
-                            className="px-3 py-2 text-sm font-semibold text-[var(--g66-text-primary)]"
-                          >
-                            {index + 1}. {getMacroActionSummary(action)}
-                          </li>
-                        ))}
-                      {(selectedMacro?.macro_actions ?? []).length === 0 ? (
-                        <li className="px-3 py-4 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                          Esta macro no tiene acciones configuradas.
-                        </li>
-                      ) : null}
-                    </ol>
-                  </div>
-                </>
-              ) : (
-                <p className="rounded-md border border-dashed border-[var(--g66-border)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                  No hay macros activas para casos.
-                </p>
-              )}
-            </div>
-            <div className="flex h-12 items-center justify-end gap-2 border-t border-[var(--g66-border)] px-4">
-              <button
-                type="button"
-                onClick={() => setIsMacroModalOpen(false)}
-                className="inline-flex h-8 items-center justify-center rounded-md border border-[var(--g66-border)] bg-white px-3 text-xs font-semibold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-background)]"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={
-                  pendingAction !== null ||
-                  !selectedMacroId ||
-                  activeMacros.length === 0
-                }
-                onClick={executeSelectedMacro}
-                className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--g66-brand-blue)] px-3 text-xs font-semibold text-white hover:bg-[var(--g66-accent-cyan)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]"
-              >
-                {pendingAction === "macro" ? "Ejecutando..." : "Ejecutar"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <CaseMacroModal
+          macros={activeMacros}
+          selectedMacroId={selectedMacroId}
+          searchQuery={macroSearchQuery}
+          recentMacroIds={recentMacroIds}
+          isExecuting={pendingAction === "macro"}
+          onSearchChange={setMacroSearchQuery}
+          onSelect={setSelectedMacroId}
+          onExecute={() => void executeSelectedMacro()}
+          onClose={() => setIsMacroModalOpen(false)}
+          summarizeAction={getMacroActionSummary}
+        />
       ) : null}
 
       {selectedEmailMessage ? (

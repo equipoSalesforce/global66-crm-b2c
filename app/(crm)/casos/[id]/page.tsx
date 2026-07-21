@@ -9,6 +9,7 @@ import type {
   CrmCaseFieldPermissionRecord,
   CrmRolePermissionRecord,
 } from "@/lib/permissions";
+import { getCurrentCrmUser } from "@/lib/current-crm-user";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -30,6 +31,7 @@ export default async function CasoExpedientePage({
     agentsResult,
     rolePermissionsResult,
     caseFieldPermissionsResult,
+    currentUserResult,
   ] = await Promise.all([
     supabase
       .from("cases")
@@ -57,6 +59,12 @@ export default async function CasoExpedientePage({
       .from("crm_case_field_permissions")
       .select("role, field_key, can_view, can_edit")
       .returns<CrmCaseFieldPermissionRecord[]>(),
+    getCurrentCrmUser()
+      .then((data) => ({ data, error: null }))
+      .catch((error: unknown) => ({
+        data: null,
+        error: error instanceof Error ? error.message : "No se pudo resolver el usuario actual.",
+      })),
   ]);
 
   let cases = (casesResult.data ?? [])
@@ -120,6 +128,7 @@ export default async function CasoExpedientePage({
     agentsResult.error?.message ??
     rolePermissionsResult.error?.message ??
     caseFieldPermissionsResult.error?.message ??
+    currentUserResult.error ??
     null;
 
   return (
@@ -151,6 +160,7 @@ export default async function CasoExpedientePage({
           cases={cases}
           messages={messagesResult.data ?? []}
           agents={agentsResult.data ?? []}
+          currentUser={currentUserResult.data!}
           rolePermissions={rolePermissionsResult.data ?? []}
           caseFieldPermissions={caseFieldPermissionsResult.data ?? []}
           initialSelectedCaseId={id}

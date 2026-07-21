@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getNavigationItems } from "@/lib/permissions";
 import { clearDemoCrmSession } from "@/lib/crm-users";
 import { DemoAvailabilitySelect } from "./demo-availability-select";
+import { GlobalSearch } from "./global-search";
 import { Global66Mark } from "./global66-mark";
 import { NotificationBell } from "./notification-bell";
 import { ToastProvider } from "./toast-provider";
@@ -17,13 +18,13 @@ import {
   BarChart3,
   BookOpen,
   BriefcaseBusiness,
+  ChevronLeft,
   ChevronRight,
   FileBarChart,
   Home,
   LayoutDashboard,
   Mail,
   MessageCircle,
-  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -51,17 +52,92 @@ const navigationIconByHref: Record<string, LucideIcon> = {
   "/configuracion": Settings,
 };
 
+type BreadcrumbItem = { label: string; href?: string };
+
+function navigationBasePath(href: string) {
+  return href.split("?")[0];
+}
+
+function isNavigationItemActive(pathname: string, href: string) {
+  const basePath = navigationBasePath(href);
+
+  if (pathname.startsWith("/configuracion")) return href === "/configuracion";
+  if (pathname.startsWith("/casos")) return href === "/casos";
+  if (pathname.startsWith("/cuentas") || pathname.startsWith("/clientes")) {
+    return href === "/cuentas" || href === "/clientes";
+  }
+
+  return pathname === basePath || pathname.startsWith(`${basePath}/`);
+}
+
+function getBreadcrumbs(
+  pathname: string,
+  fallbackLabel: string,
+  caseNumber: string | null,
+): BreadcrumbItem[] {
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (pathname.startsWith("/casos")) {
+    if (pathname === "/casos") return [{ label: "Casos" }];
+    if (pathname === "/casos/nuevo") {
+      return [{ label: "Casos", href: "/casos" }, { label: "Nuevo caso" }];
+    }
+    return [
+      { label: "Casos", href: "/casos" },
+      { label: caseNumber || "Detalle de caso" },
+    ];
+  }
+  if (pathname.startsWith("/configuracion")) {
+    const sectionLabels: Record<string, string> = {
+      ia: "Gobierno IA",
+      macros: "Macros",
+      "layout-builder": "Layout Builder",
+      "mensajes-rapidos": "Mensajes rápidos",
+      objetos: "Objetos",
+      permisos: "Permisos",
+      usuarios: "Usuarios",
+      "templates-correo": "Templates de correo",
+    };
+    const breadcrumbs: BreadcrumbItem[] = [
+      { label: "Configuración", href: pathname === "/configuracion" ? undefined : "/configuracion" },
+    ];
+    if (segments[1]) {
+      breadcrumbs.push({
+        label: sectionLabels[segments[1]] || segments[1],
+        href: segments.length > 2 ? `/configuracion/${segments[1]}` : undefined,
+      });
+    }
+    if (segments.length > 2) {
+      breadcrumbs.push({
+        label: segments[2] === "nueva" ? "Nueva" : "Detalle",
+      });
+    }
+    return breadcrumbs;
+  }
+  if (pathname.startsWith("/dashboards")) {
+    return pathname === "/dashboards"
+      ? [{ label: "Dashboards" }]
+      : [{ label: "Dashboards", href: "/dashboards" }, { label: "Dashboard" }];
+  }
+  if (pathname.startsWith("/cuentas") || pathname.startsWith("/clientes")) {
+    return segments.length === 1
+      ? [{ label: "Cuentas" }]
+      : [{ label: "Cuentas", href: "/cuentas" }, { label: "Cliente" }];
+  }
+  if (pathname === "/mi-ia") {
+    return [{ label: "IA" }, { label: "Mi perfil IA" }];
+  }
+
+  return [{ label: fallbackLabel }];
+}
+
 export function CrmShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, isChecking } = useCrmSession();
   const { permissions: rolePermissions } = useCrmPermissions();
-  const [isLauncherOpen, setIsLauncherOpen] = useState(false);
-  const [launcherQuery, setLauncherQuery] = useState("");
-  const [casesGlobalSearch, setCasesGlobalSearch] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
   const [caseBreadcrumbNumber, setCaseBreadcrumbNumber] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const launcherRef = useRef<HTMLDivElement | null>(null);
   const agentId = user?.id ?? "";
   const agentName = user?.name ?? "Agente";
   const agentRole = user?.role ?? "AGENT";
@@ -72,26 +148,27 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === "/dashboard";
   const isCasesConsole = isCaseExpediente;
   const isAccount360 = pathname.startsWith("/cuentas/");
-  const isSidebarCompact = sidebarCollapsed || isAccount360 || isCaseExpediente;
+  const isSidebarCompact = sidebarCollapsed;
   const visibleNavigationItems = getNavigationItems(agentRole, rolePermissions);
   const activeItem =
     [...visibleNavigationItems]
       .sort((left, right) => right.href.length - left.href.length)
-      .find(
-        (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-      ) ??
+      .find((item) => isNavigationItemActive(pathname, item.href)) ??
     visibleNavigationItems[0] ??
     getNavigationItems("AGENT", rolePermissions)[0];
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
+      const storedPreference = window.localStorage.getItem("crmSidebarCollapsed");
       setSidebarCollapsed(
-        window.localStorage.getItem("crmSidebarCollapsed") === "true",
+        storedPreference === null
+          ? isCaseExpediente || isAccount360
+          : storedPreference === "true",
       );
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, []);
+  }, [isAccount360, isCaseExpediente]);
 
   function toggleSidebarCollapsed() {
     setSidebarCollapsed((current) => {
@@ -120,23 +197,6 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("case-header-context", handleCaseHeaderContext);
     };
   }, [isCaseExpediente]);
-
-  useEffect(() => {
-    if (!isLauncherOpen) return;
-
-    function handleClick(event: MouseEvent) {
-      if (
-        launcherRef.current &&
-        !launcherRef.current.contains(event.target as Node)
-      ) {
-        setIsLauncherOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handleClick);
-
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [isLauncherOpen]);
 
   useEffect(() => {
     if (!agentId) return;
@@ -179,16 +239,9 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
     };
   }, [agentId]);
 
-  const filteredNavigationItems = visibleNavigationItems.filter((item) =>
-    item.label.toLowerCase().includes(launcherQuery.toLowerCase()),
-  );
-
-  function updateCasesGlobalSearch(value: string) {
-    setCasesGlobalSearch(value);
-    window.dispatchEvent(
-      new CustomEvent("cases-global-search", { detail: value }),
-    );
-  }
+  const breadcrumbs = getBreadcrumbs(pathname, activeItem.label, caseBreadcrumbNumber);
+  const ActiveNavigationIcon =
+    navigationIconByHref[activeItem.href] ?? BriefcaseBusiness;
 
   if (isChecking) {
     return (
@@ -229,8 +282,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
 
             <nav className="mt-6 grid gap-1">
               {visibleNavigationItems.map((item) => {
-                const isActive =
-                  pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const isActive = isNavigationItemActive(pathname, item.href);
                 const Icon = navigationIconByHref[item.href] ?? BriefcaseBusiness;
 
                 return (
@@ -282,7 +334,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                   </p>
                 </div>
               </div>
-              {!isAccount360 ? <button
+              <button
                 type="button"
                 onClick={toggleSidebarCollapsed}
                 className={`mt-3 flex h-8 w-full items-center justify-center rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white text-xs font-black text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] ${
@@ -290,185 +342,107 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                 }`}
                 title={sidebarCollapsed ? "Expandir sidebar" : "Colapsar sidebar"}
               >
-                {isSidebarCompact ? ">" : "< Colapsar"}
-              </button> : null}
+                {isSidebarCompact ? (
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <>
+                    <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+                    Colapsar
+                  </>
+                )}
+              </button>
             </div>
           </aside>
         ) : null}
 
         <header
-          className={`fixed right-0 top-0 z-40 grid items-center border-b border-[var(--g66-border)] bg-[var(--g66-surface)] shadow-sm ${
-            isCaseExpediente
-              ? `${caseDetailManrope.variable} ${caseDetailMono.variable} ${originalStyles.caseTopBar}`
-              : "h-10 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 px-2"
-          } ${
+          className={`${caseDetailManrope.variable} ${caseDetailMono.variable} ${originalStyles.caseTopBar} fixed right-0 top-0 z-40 grid items-center border-b border-[var(--g66-border)] bg-[var(--g66-surface)] shadow-sm ${
             hasGlobalSidebar ? (isSidebarCompact ? "left-16" : "left-60") : "left-0"
           }`}
         >
-          <div ref={launcherRef} className="relative min-w-0">
-            {isCaseExpediente ? (
-              <nav aria-label="Breadcrumb" className={`${originalStyles.topBreadcrumb} flex min-w-0 items-center`}>
-                <Link href="/casos" className="inline-flex items-center gap-1.5 text-[var(--g66-text-muted)] transition hover:text-[var(--g66-brand-blue)]">
-                  <BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden="true" />
-                  Casos
-                </Link>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--g66-text-muted)]" aria-hidden="true" />
-                <span className="truncate font-mono text-[var(--g66-text-primary)]">
-                  {caseBreadcrumbNumber || "Cargando..."}
-                </span>
-              </nav>
-            ) : null}
-            {hasGlobalSidebar ? (
-              !isCaseExpediente ? <div className="w-2" aria-hidden="true" /> : null
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsLauncherOpen((current) => !current)}
-                className="inline-flex h-8 items-center gap-2 rounded-full border border-transparent px-1.5 pr-3 text-sm font-extrabold text-[var(--g66-brand-blue)] hover:border-[var(--g66-border)] hover:bg-[var(--g66-brand-blue-soft)]"
-                aria-expanded={isLauncherOpen}
-                aria-label="Abrir App Launcher"
-              >
-                <Global66Mark className="h-6 w-6" />
-                <span>Global66 CRM</span>
-              </button>
-            )}
+          <nav
+            aria-label="Breadcrumb"
+            className={`${originalStyles.topBreadcrumb} flex min-w-0 items-center`}
+          >
+            <ActiveNavigationIcon
+              className="h-3.5 w-3.5 shrink-0 text-[var(--g66-text-muted)]"
+              aria-hidden="true"
+            />
+            {breadcrumbs.map((breadcrumb, index) => (
+              <span key={`${breadcrumb.label}-${index}`} className="contents">
+                {index > 0 ? (
+                  <ChevronRight
+                    className="h-3.5 w-3.5 shrink-0 text-[var(--g66-text-muted)]"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                {breadcrumb.href ? (
+                  <Link
+                    href={breadcrumb.href}
+                    className="truncate text-[var(--g66-text-muted)] transition hover:text-[var(--g66-brand-blue)]"
+                  >
+                    {breadcrumb.label}
+                  </Link>
+                ) : (
+                  <span className="truncate font-medium text-[var(--g66-text-primary)]">
+                    {breadcrumb.label}
+                  </span>
+                )}
+              </span>
+            ))}
+          </nav>
 
-            {!isCaseExpediente && isLauncherOpen ? (
-              <div className="absolute left-0 top-9 z-50 w-72 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-[var(--g66-surface)] p-2 shadow-[var(--g66-shadow-soft)]">
-                <input
-                  value={launcherQuery}
-                  onChange={(event) => setLauncherQuery(event.target.value)}
-                  placeholder="Buscar..."
-                  className="h-8 w-full rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] px-2 text-sm text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)] focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-[var(--g66-brand-blue-soft)]"
-                />
-                <nav className="mt-2 grid gap-1">
-                  {filteredNavigationItems.map((item) => {
-                    const isActive =
-                      pathname === item.href ||
-                      pathname.startsWith(`${item.href}/`);
-                    const Icon = navigationIconByHref[item.href] ?? BriefcaseBusiness;
-
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        aria-current={isActive ? "page" : undefined}
-                        onClick={() => setIsLauncherOpen(false)}
-                        className={`flex h-9 items-center gap-2 rounded-md px-2 text-sm font-semibold transition-colors ${
-                          isActive
-                            ? "bg-[var(--g66-brand-blue)] text-white"
-                            : "text-[var(--g66-text-primary)] hover:bg-[var(--g66-brand-blue-soft)]"
-                        }`}
-                      >
-                        <span
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center ${
-                            isActive ? "text-white" : "text-[var(--g66-text-secondary)]"
-                          }`}
-                        >
-                          <Icon className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                  {filteredNavigationItems.length === 0 ? (
-                    <p className="px-2 py-3 text-sm text-[var(--g66-text-muted)]">
-                      No hay resultados.
-                    </p>
-                  ) : null}
-                </nav>
-              </div>
-            ) : null}
+          <div className="flex justify-center px-4">
+            <GlobalSearch className="max-w-[520px]" />
           </div>
-          {hasGlobalSidebar ? (
-            <div className="flex justify-center px-4">
-              <label
-                className={`flex w-full items-center gap-2 rounded-[var(--g66-radius-md)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] text-[var(--g66-text-muted)] focus-within:border-[var(--g66-brand-blue)] focus-within:bg-white focus-within:ring-2 focus-within:ring-[var(--g66-brand-blue-soft)] ${
-                  isCaseExpediente
-                    ? originalStyles.topSearch
-                    : `h-7 px-3 ${isAccount360 ? "max-w-lg" : "max-w-2xl"}`
-                }`}
-              >
-                {isCaseExpediente ? <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
-                <input
-                  value={casesGlobalSearch}
-                  onChange={(event) => updateCasesGlobalSearch(event.target.value)}
-                  placeholder="Buscar clientes, casos, conversaciones..."
-                  className="h-full min-w-0 flex-1 bg-transparent text-[13px] font-normal text-[var(--g66-text-primary)] outline-none placeholder:text-[var(--g66-text-muted)]"
-                />
-              </label>
-            </div>
-          ) : (
-            <div />
-          )}
-          {isCaseExpediente ? (
-            <div className={`${originalStyles.topActions} flex min-w-0 items-center justify-end`}>
-              {agentId ? (
-                <div className={`${originalStyles.availability} inline-flex items-center bg-white`}>
-                  <span className="h-2 w-2 rounded-full bg-[var(--g66-success)]" aria-hidden="true" />
-                  <DemoAvailabilitySelect userId={agentId} compact showLabel={false} bare />
-                </div>
-              ) : null}
-              <Link
-                href="/login"
-                onClick={logoutDemoUser}
-                className={`${originalStyles.changeUser} whitespace-nowrap text-[var(--g66-brand-blue)] hover:underline`}
-              >
-                Cambiar usuario
-              </Link>
-              <span className="h-8 w-px bg-[var(--g66-border)]" aria-hidden="true" />
-              <div className={`${originalStyles.currentUser} flex min-w-0 items-center`}>
-                <span className={`${originalStyles.currentUserAvatar} flex shrink-0 items-center justify-center bg-[var(--g66-brand-blue)] text-white`}>
-                  {agentName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className={`${originalStyles.currentUserName} truncate text-[var(--g66-text-primary)]`}>{agentName}</p>
-                  <p className={`${originalStyles.currentUserRole} truncate uppercase`}>
-                    {[agentRole, user?.team || user?.area].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="hidden truncate text-xs font-semibold text-[var(--g66-text-muted)] sm:inline">
-              {activeItem.label}
-            </span>
-            <span className="hidden truncate text-xs font-semibold text-[var(--g66-text-primary)] md:inline">
-              {agentName} · {agentRole}
-            </span>
-            {notificationCount > 0 ? (
-              <Link
-                href="/casos"
-                className="hidden rounded-full bg-[var(--g66-danger-soft)] px-2 py-1 text-xs font-bold text-[var(--g66-danger)] lg:inline-flex"
-              >
-                WhatsApp pendientes: {notificationCount}
-              </Link>
-            ) : null}
+
+          <div className={`${originalStyles.topActions} flex min-w-0 items-center justify-end`}>
             {agentId ? (
               <NotificationBell key={agentId} currentUserId={agentId} />
             ) : null}
+            {!isCaseExpediente && notificationCount > 0 ? (
+              <Link
+                href="/casos"
+                className="hidden rounded-full bg-[var(--g66-danger-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--g66-danger)] 2xl:inline-flex"
+              >
+                WhatsApp: {notificationCount}
+              </Link>
+            ) : null}
             {agentId ? (
-              <DemoAvailabilitySelect userId={agentId} compact />
+              <div className={`${originalStyles.availability} inline-flex items-center bg-white`}>
+                <span className="h-2 w-2 rounded-full bg-[var(--g66-success)]" aria-hidden="true" />
+                <DemoAvailabilitySelect userId={agentId} compact showLabel={false} bare />
+              </div>
             ) : null}
             <Link
               href="/login"
               onClick={logoutDemoUser}
-              className="hidden rounded-full border border-[var(--g66-border)] px-2 py-1 text-xs font-bold text-[var(--g66-text-secondary)] hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] lg:inline-flex"
+              className={`${originalStyles.changeUser} whitespace-nowrap text-[var(--g66-brand-blue)] hover:underline`}
             >
               Cambiar usuario
             </Link>
+            <span className="h-8 w-px bg-[var(--g66-border)]" aria-hidden="true" />
+            <div className={`${originalStyles.currentUser} flex min-w-0 items-center`}>
+              <span className={`${originalStyles.currentUserAvatar} flex shrink-0 items-center justify-center bg-[var(--g66-brand-blue)] text-white`}>
+                {agentName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
+              </span>
+              <div className="min-w-0">
+                <p className={`${originalStyles.currentUserName} truncate text-[var(--g66-text-primary)]`}>{agentName}</p>
+                <p className={`${originalStyles.currentUserRole} truncate uppercase`}>
+                  {[agentRole, user?.team || user?.area].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
           </div>
-          )}
         </header>
 
         <main
           className={
             hasGlobalSidebar
               ? isSidebarCompact
-                ? `pl-16 ${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
-                : `pl-60 ${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
-              : `${isCaseExpediente ? "pt-[58px]" : "pt-10"} ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+                ? `pl-16 pt-[58px] ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+                : `pl-60 pt-[58px] ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
+              : `pt-[58px] ${isCasesConsole ? "h-screen overflow-hidden" : ""}`
           }
         >
           <div
@@ -476,11 +450,11 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
               isCasesConsole
                 ? "h-[calc(100vh-58px)] min-h-0 w-full overflow-hidden bg-white"
                 : isCasesList
-                  ? "min-h-[calc(100vh-40px)] w-full bg-[#F4F6FA]"
+                  ? "min-h-[calc(100vh-58px)] w-full bg-[#F4F6FA]"
                 : isDashboard
-                  ? "min-h-[calc(100vh-40px)] w-full overflow-hidden bg-[var(--g66-background)]"
+                  ? "min-h-[calc(100vh-58px)] w-full overflow-hidden bg-[var(--g66-background)]"
                 : isAccount360
-                  ? "flex min-h-[calc(100vh-40px)] w-full flex-col gap-3 bg-[#f5f7fb] px-3 py-3 xl:px-4"
+                  ? "flex min-h-[calc(100vh-58px)] w-full flex-col gap-3 bg-[#f5f7fb] px-3 py-3 xl:px-4"
                 : "mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-5 lg:px-6 lg:py-6"
             }
           >
