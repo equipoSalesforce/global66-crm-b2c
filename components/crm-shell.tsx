@@ -92,6 +92,7 @@ function getBreadcrumbs(
       ia: "Gobierno IA",
       macros: "Macros",
       "layout-builder": "Layout Builder",
+      "conocimiento-ia": "Conocimiento IA",
       "mensajes-rapidos": "Mensajes rápidos",
       objetos: "Objetos",
       permisos: "Permisos",

@@ -36,6 +36,7 @@ import {
   type ResolvedCaseAreaLayout,
 } from "@/lib/case-metadata";
 import type { CaseAssignmentResult, CaseOwnerType, DuplicateCaseResult } from "@/lib/case-ownership-types";
+import type { KnowledgeSuggestionPayload } from "@/lib/ai-knowledge-types";
 import { normalizeAircallPhone } from "@/lib/aircall";
 import {
   canEditCaseField,
@@ -53,6 +54,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
+  BookOpen,
   Check,
   CheckCheck,
   CornerDownLeft,
@@ -890,6 +892,8 @@ function CaseAiHistoryPanel({
   error,
   canGenerate,
   onGenerate,
+  knowledgeSuggestion,
+  onKnowledgeFeedback,
 }: {
   selectedCase: ConsoleCaseRecord;
   payload: CaseAiHistoryResponse | null;
@@ -898,6 +902,8 @@ function CaseAiHistoryPanel({
   error: string | null;
   canGenerate: boolean;
   onGenerate: () => void;
+  knowledgeSuggestion: KnowledgeSuggestionPayload | null;
+  onKnowledgeFeedback: (rating: "HELPFUL" | "NOT_HELPFUL") => void;
 }) {
   const summary = payload?.cachedSummary;
   const metrics = summary?.metrics ?? payload?.metrics ?? {};
@@ -909,6 +915,21 @@ function CaseAiHistoryPanel({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3">
       <div className="grid gap-3">
+        {knowledgeSuggestion ? (
+          <section className="rounded-[var(--g66-radius-lg)] border border-blue-200 bg-white p-4 shadow-[var(--g66-shadow-card)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--g66-text-primary)]"><BookOpen className="h-4 w-4 text-[var(--g66-brand-blue)]" />Sugerencia basada en conocimiento</h3><p className="mt-1 text-xs text-[var(--g66-text-secondary)]">Respuesta insertada en el composer para revisión del ejecutivo.</p></div>
+              <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">Confianza {knowledgeSuggestion.confidence}</span>
+            </div>
+            <p className="mt-3 whitespace-pre-wrap rounded-lg bg-[var(--g66-surface-soft)] p-3 text-sm leading-6 text-[var(--g66-text-primary)]">{knowledgeSuggestion.customerReply}</p>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <div><h4 className="text-xs font-semibold">Fuentes utilizadas</h4><ul className="mt-2 grid gap-1 text-xs text-[var(--g66-text-secondary)]">{knowledgeSuggestion.sources.map((source, index) => <li key={`${source.title}-${source.version}-${index}`}>• {source.title} · {source.source} · {source.version}</li>)}{!knowledgeSuggestion.sources.length ? <li>No se encontró una fuente publicada suficiente.</li> : null}</ul></div>
+              <div><h4 className="text-xs font-semibold">Próximas acciones</h4><ul className="mt-2 grid gap-1 text-xs text-[var(--g66-text-secondary)]">{knowledgeSuggestion.nextActions.map((action) => <li key={action}>• {action}</li>)}{!knowledgeSuggestion.nextActions.length ? <li>Sin acciones sugeridas.</li> : null}</ul></div>
+            </div>
+            {knowledgeSuggestion.warnings.length || knowledgeSuggestion.missingInfo.length ? <div className="mt-3 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{knowledgeSuggestion.warnings.length ? <p><strong>Advertencias internas:</strong> {knowledgeSuggestion.warnings.join(" · ")}</p> : null}{knowledgeSuggestion.missingInfo.length ? <p><strong>Datos faltantes:</strong> {knowledgeSuggestion.missingInfo.join(" · ")}</p> : null}</div> : null}
+            <div className="mt-3 flex items-center justify-end gap-2"><span className="text-[10px] text-[var(--g66-text-muted)]">¿Fue útil?</span><button type="button" onClick={() => onKnowledgeFeedback("HELPFUL")} className="h-7 rounded-lg border px-2 text-[10px] font-semibold text-emerald-700">Sí</button><button type="button" onClick={() => onKnowledgeFeedback("NOT_HELPFUL")} className="h-7 rounded-lg border px-2 text-[10px] font-semibold text-slate-600">No</button></div>
+          </section>
+        ) : null}
         <section className="rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white p-4 shadow-[var(--g66-shadow-card)]">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1876,6 +1897,7 @@ export function CasesConsole({
   const [isAiHistoryLoading, setIsAiHistoryLoading] = useState(false);
   const [isAiHistoryGenerating, setIsAiHistoryGenerating] = useState(false);
   const [aiHistoryError, setAiHistoryError] = useState<string | null>(null);
+  const [knowledgeSuggestions, setKnowledgeSuggestions] = useState<Record<string, KnowledgeSuggestionPayload>>({});
   const [customFieldErrors, setCustomFieldErrors] = useState<Record<string, string>>(
     {},
   );
@@ -1958,6 +1980,43 @@ export function CasesConsole({
   const canEditAnyCaseInfoField = standardCaseFieldKeys.some((fieldKey) =>
     canEditCaseInfoField(fieldKey),
   );
+
+  useEffect(() => {
+    function handleKnowledgeSuggestion(event: Event) {
+      const detail = (event as CustomEvent<KnowledgeSuggestionPayload & { caseId?: string }>).detail;
+      if (!detail?.caseId || !detail.customerReply) return;
+      setKnowledgeSuggestions((current) => ({
+        ...current,
+        [detail.caseId!]: {
+          customerReply: detail.customerReply,
+          agentSummary: detail.agentSummary || "",
+          nextActions: detail.nextActions || [],
+          sources: detail.sources || [],
+          confidence: detail.confidence || "LOW",
+          missingInfo: detail.missingInfo || [],
+          warnings: detail.warnings || [],
+        },
+      }));
+    }
+    window.addEventListener("case-ai-knowledge-suggestion", handleKnowledgeSuggestion);
+    return () => window.removeEventListener("case-ai-knowledge-suggestion", handleKnowledgeSuggestion);
+  }, []);
+
+  async function submitKnowledgeFeedback(rating: "HELPFUL" | "NOT_HELPFUL") {
+    if (!selectedCaseId) return;
+    try {
+      const response = await fetch("/api/knowledge/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId: selectedCaseId, rating }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "No se pudo registrar el feedback.");
+      toast.success("Feedback de conocimiento registrado.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo registrar el feedback.");
+    }
+  }
   const refreshCaseAuditEvents = useCallback(async (caseId: string) => {
     const { data, error } = await supabaseBrowser
       .from("case_audit_events")
@@ -4969,6 +5028,8 @@ export function CasesConsole({
                     error={aiHistoryError}
                     canGenerate={canGenerateAiCaseSummary}
                     onGenerate={generateAiHistorySummary}
+                    knowledgeSuggestion={knowledgeSuggestions[selectedCase.id] ?? null}
+                    onKnowledgeFeedback={submitKnowledgeFeedback}
                   />
                 ) : null}
 

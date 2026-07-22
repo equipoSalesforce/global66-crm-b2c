@@ -38,6 +38,13 @@ type MediaReplyResponse = {
 type AiSuggestionResponse = {
   ok?: boolean;
   suggestion?: string;
+  customerReply?: string;
+  agentSummary?: string;
+  nextActions?: string[];
+  sources?: Array<{ title: string; source: string; version: string; metadata: Record<string, string | null> }>;
+  confidence?: "HIGH" | "MEDIUM" | "LOW";
+  missingInfo?: string[];
+  warnings?: string[];
   error?: string;
 };
 
@@ -239,6 +246,9 @@ export function CaseReplyForm({
       }
 
       insertText(payload.suggestion);
+      window.dispatchEvent(new CustomEvent("case-ai-knowledge-suggestion", {
+        detail: { caseId, ...payload },
+      }));
       toast.info("ℹ Sugerencia IA insertada");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

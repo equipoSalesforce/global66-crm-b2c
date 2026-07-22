@@ -11,6 +11,8 @@ import { assignCaseAutomatically } from "./assignment";
 import { getCaseWhatsappTarget, isWhatsappCase } from "./case-whatsapp";
 import { supabase } from "./supabase";
 import { sendWhatsappMessage } from "./whatsapp-send";
+import { retrieveKnowledge } from "./ai-knowledge-retrieval-service";
+import { generateKnowledgeGroundedResponse } from "./ai/knowledge-grounded-response";
 
 type CaseForTriage = {
   id: string | number;
@@ -18,6 +20,8 @@ type CaseForTriage = {
   subject: string | null;
   area: string | null;
   category: string | null;
+  product: string | null;
+  subproduct: string | null;
   priority: string | null;
   status: string | null;
   lifecycle_status: string | null;
@@ -516,7 +520,7 @@ async function loadTriageContext(caseId: string) {
     supabase
       .from("cases")
       .select(
-        "id, case_number, subject, area, category, priority, status, lifecycle_status, routing_status, channel, contact_type, assigned_agent_id, assigned_to, customer:customers(name, email, phone)",
+        "id, case_number, subject, area, category, product, subproduct, priority, status, lifecycle_status, routing_status, channel, contact_type, assigned_agent_id, assigned_to, customer:customers(name, email, phone)",
       )
       .eq("id", caseId)
       .limit(1)
@@ -1128,48 +1132,41 @@ function countAiMessages(messages: ConversationMessage[]) {
 }
 
 export async function generateAgentAiSuggestion(caseId: string) {
-  const { caseItem, messages, conversationMessages, articles } =
+  const { caseItem, messages, conversationMessages } =
     await loadTriageContext(caseId);
   const latestCustomerMessage = getLatestCustomerMessage(messages);
   const intent = classifyDemoIntent(latestCustomerMessage?.body);
-  const relevantArticles = selectRelevantArticles({
-    articles,
-    latestMessage: latestCustomerMessage?.body ?? "",
-    intent,
+  const knowledgeResults = latestCustomerMessage?.body?.trim()
+    ? await retrieveKnowledge({
+        query: latestCustomerMessage.body,
+        caseId,
+        product: caseItem.product || caseItem.subproduct,
+        category: caseItem.category,
+        includeInternal: true,
+        limit: 8,
+      })
+    : [];
+  const groundedSuggestion = await generateKnowledgeGroundedResponse({
+    query: latestCustomerMessage?.body?.trim() || "El cliente todavía no ha formulado una consulta.",
+    conversation: conversationMessages
+      .map((message) => `${message.sender_type || message.direction || "UNKNOWN"}: ${message.body || ""}`)
+      .join("\n"),
+    caseMetadata: {
+      caseNumber: caseItem.case_number,
+      product: caseItem.product,
+      subproduct: caseItem.subproduct,
+      category: caseItem.category,
+      area: caseItem.area,
+    },
+    results: knowledgeResults,
   });
-  const lastAiMessage = getLastAiMessage(conversationMessages);
-  let suggestion = buildGlobal66SupportReply({
-    intent,
-    latestMessage: latestCustomerMessage?.body,
-    forAgent: true,
-  });
-
-  if (!latestCustomerMessage?.body?.trim()) {
-    suggestion =
-      "Hola, para ayudarte mejor, cuéntame brevemente qué necesitas revisar de tu cuenta Global66.";
-  }
-
-  if (isRepeatedResponse(suggestion, lastAiMessage)) {
-    if (intent === "TRANSFERENCIA_NO_RECIBIDA") {
-      suggestion =
-        "Para avanzar con la revisión de la transferencia, compárteme el correo asociado, país destino, fecha de envío, monto aproximado y el comprobante si lo tienes.";
-    } else if (intent === "ACCESO_CUENTA") {
-      suggestion =
-        "Para revisar el acceso sin comprometer tu seguridad, indícame el correo o teléfono asociado y el mensaje exacto que aparece. No compartas claves ni códigos.";
-    } else if (intent === "MOVIMIENTO_DESCONOCIDO") {
-      suggestion =
-        "Voy a derivar este movimiento para revisión prioritaria. Envíame fecha, monto, moneda y referencia visible para asociarlo correctamente al caso.";
-    } else {
-      suggestion =
-        "Voy a dejar tu solicitud asociada al caso para revisión. Si tienes un comprobante o detalle adicional no sensible, puedes enviarlo por este medio.";
-    }
-  }
+  const suggestion = groundedSuggestion.customerReply;
 
   logTriage("sugerencia IA ejecutivo generada", {
     caseId,
     caseNumber: caseItem.case_number,
     intent,
-    relevantArticleCount: relevantArticles.length,
+    relevantArticleCount: knowledgeResults.length,
     latestCustomerMessage: latestCustomerMessage?.body ?? null,
     suggestionPreview: suggestion.slice(0, 300),
   });
@@ -1177,11 +1174,8 @@ export async function generateAgentAiSuggestion(caseId: string) {
   return {
     suggestion,
     intent,
-    usedArticles: relevantArticles.map((article) => ({
-      id: article.id,
-      title: article.title,
-      category: article.category,
-    })),
+    usedArticles: knowledgeResults.map((result) => ({ id: result.articleId, title: result.title, category: result.category })),
+    ...groundedSuggestion,
   };
 }
 

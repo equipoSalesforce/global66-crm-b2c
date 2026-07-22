@@ -94,6 +94,20 @@ export default async function ConfiguracionPage() {
           </section>
 
           <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-gray-950">Conocimiento IA</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              Administra las fuentes que utiliza la IA para sugerir respuestas,
+              clasificar casos y recomendar próximas acciones.
+            </p>
+            <Link
+              href="/configuracion/conocimiento-ia"
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-semibold text-white hover:bg-[var(--g66-accent-cyan)]"
+            >
+              Administrar conocimiento
+            </Link>
+          </section>
+
+          <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">
             <h2 className="text-lg font-bold text-gray-950">
               Automatización operacional
             </h2>
