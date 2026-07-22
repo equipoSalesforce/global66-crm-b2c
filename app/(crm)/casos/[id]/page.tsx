@@ -10,6 +10,7 @@ import type {
   CrmRolePermissionRecord,
 } from "@/lib/permissions";
 import { getCurrentCrmUser } from "@/lib/current-crm-user";
+import { getCaseDetailSidebarViewModel } from "@/lib/case-detail-sidebar-service";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -32,11 +33,12 @@ export default async function CasoExpedientePage({
     rolePermissionsResult,
     caseFieldPermissionsResult,
     currentUserResult,
+    sidebarViewModelResult,
   ] = await Promise.all([
     supabase
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
+        "id, case_number, customer_id, subject, description, numero_caso_seguimiento, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, cat_secundaria, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
       )
       .order("created_at", { ascending: false })
       .returns<CaseRecord[]>(),
@@ -64,6 +66,15 @@ export default async function CasoExpedientePage({
       .catch((error: unknown) => ({
         data: null,
         error: error instanceof Error ? error.message : "No se pudo resolver el usuario actual.",
+      })),
+    getCaseDetailSidebarViewModel(id)
+      .then((data) => ({ data, error: null }))
+      .catch((error: unknown) => ({
+        data: null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "No se pudo cargar el sidebar del caso.",
       })),
   ]);
 
@@ -129,6 +140,7 @@ export default async function CasoExpedientePage({
     rolePermissionsResult.error?.message ??
     caseFieldPermissionsResult.error?.message ??
     currentUserResult.error ??
+    sidebarViewModelResult.error ??
     null;
 
   return (
@@ -164,6 +176,7 @@ export default async function CasoExpedientePage({
           rolePermissions={rolePermissionsResult.data ?? []}
           caseFieldPermissions={caseFieldPermissionsResult.data ?? []}
           initialSelectedCaseId={id}
+          initialSidebarViewModel={sidebarViewModelResult.data!}
         />
       )}
     </RoleGuard>

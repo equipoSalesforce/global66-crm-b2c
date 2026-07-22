@@ -91,6 +91,12 @@ export default async function ConfiguracionPage() {
             >
               Layout Builder
             </Link>
+            <Link
+              href="/configuracion/objetos/caso?tab=layout-detalle"
+              className="ml-2 mt-4 inline-flex h-10 items-center justify-center rounded-lg border border-[var(--g66-brand-blue)] bg-white px-4 text-sm font-semibold text-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
+            >
+              Layout detalle caso
+            </Link>
           </section>
 
           <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">

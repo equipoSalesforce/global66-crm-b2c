@@ -6,12 +6,18 @@ export type CustomerIdentity = {
   id: string;
   publicId: string;
   customerId: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
 };
 
 type CustomerIdentityRecord = {
   id: string;
   public_id: string;
   customer_id: string | null;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
 };
 
 export class CustomerIdentityError extends Error {}
@@ -25,7 +31,7 @@ export async function resolveCustomerIdentityByPublicId(
 ): Promise<CustomerIdentity | null> {
   const { data, error } = await supabase
     .from("customers")
-    .select("id, public_id, customer_id")
+    .select("id, public_id, customer_id, name, email, phone")
     .eq("public_id", publicId)
     .maybeSingle<CustomerIdentityRecord>();
 
@@ -44,5 +50,8 @@ export async function resolveCustomerIdentityByPublicId(
     id: data.id,
     publicId: data.public_id,
     customerId: data.customer_id,
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
   };
 }

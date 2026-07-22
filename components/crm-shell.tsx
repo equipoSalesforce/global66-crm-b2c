@@ -92,6 +92,7 @@ function getBreadcrumbs(
       ia: "Gobierno IA",
       macros: "Macros",
       "layout-builder": "Layout Builder",
+      "layout-detalle-caso": "Layout detalle caso",
       "conocimiento-ia": "Conocimiento IA",
       "mensajes-rapidos": "Mensajes rápidos",
       objetos: "Objetos",
@@ -147,6 +148,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const isCasesList = pathname === "/casos";
   const hasGlobalSidebar = true;
   const isDashboard = pathname === "/dashboard";
+  const isCaseObjectManager = pathname === "/configuracion/objetos/caso";
   const isCasesConsole = isCaseExpediente;
   const isAccount360 = pathname.startsWith("/cuentas/");
   const isSidebarCompact = sidebarCollapsed;
@@ -456,6 +458,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                   ? "min-h-[calc(100vh-58px)] w-full overflow-hidden bg-[var(--g66-background)]"
                 : isAccount360
                   ? "flex min-h-[calc(100vh-58px)] w-full flex-col gap-3 bg-[#f5f7fb] px-3 py-3 xl:px-4"
+                : isCaseObjectManager
+                  ? "flex min-h-[calc(100vh-58px)] w-full flex-col gap-4 bg-[var(--g66-background)] px-3 py-4 xl:px-4"
                 : "mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-5 lg:px-6 lg:py-6"
             }
           >

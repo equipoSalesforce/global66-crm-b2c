@@ -139,6 +139,7 @@ export type CaseAreaLayout = {
   description: string | null;
   is_active: boolean;
   fields: CaseAreaLayoutField[];
+  layout_schema?: unknown;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -146,6 +147,7 @@ export type CaseAreaLayout = {
 };
 
 export type ResolvedCaseAreaLayout = CaseAreaLayout & {
+  formSchema: import("@/lib/case-form-layout").CaseFormLayoutSchema;
   fieldDefinitions: CaseFieldDefinition[];
 };
 

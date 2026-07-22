@@ -7,7 +7,7 @@ import { AccountSummaryMetrics } from "@/components/account-360/account-summary-
 import { AccountWallets } from "@/components/account-360/account-wallets";
 import {
   Account360ApiError,
-  getAccount360,
+  type Account360,
   type Account360View,
 } from "@/lib/account-360-api";
 import {
@@ -18,13 +18,14 @@ import {
   CustomerIdentityError,
   resolveCustomerIdentityByPublicId,
 } from "@/lib/customer-identity-service";
+import { getCustomerAccount360 } from "@/lib/customer-profile-service";
 import { BriefcaseBusiness, ChevronRight } from "lucide-react";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 function buildAccount360View(
-  account: Awaited<ReturnType<typeof getAccount360>>,
+  account: Account360,
   publicId: string,
   customerId: string,
   crmActivity: Awaited<ReturnType<typeof getCustomerCrmActivity>>,
@@ -48,7 +49,7 @@ function buildAccount360View(
 }
 
 function inferActivityCategory(
-  item: Awaited<ReturnType<typeof getAccount360>>["activity"][number],
+  item: Account360["activity"][number],
 ) {
   const value = `${item.activity_type} ${item.channel} ${item.title}`.toUpperCase();
   if (/TRANSACTION|EXCHANGE|PAYMENT|CARD|P2P|REM/.test(value)) {
@@ -74,7 +75,14 @@ export default async function Account360Page({
     if (!identity) notFound();
 
     const [internalAccount, crmActivity] = await Promise.all([
-      getAccount360(identity.customerId),
+      getCustomerAccount360({
+        id: identity.id,
+        customer_id: identity.customerId,
+        public_id: identity.publicId,
+        name: identity.name,
+        email: identity.email,
+        phone: identity.phone,
+      }),
       getCustomerCrmActivity(identity.id),
     ]);
     account = buildAccount360View(

@@ -1,4 +1,5 @@
-import { getAccount360, type Account360 } from "@/lib/account-360-api";
+import type { Account360 } from "@/lib/account-360-api";
+import { getCustomerAccount360 } from "@/lib/customer-profile-service";
 import { supabase } from "@/lib/supabase";
 
 export type AccountDirectoryEntry = {
@@ -11,8 +12,12 @@ export type AccountDirectoryEntry = {
 };
 
 type CustomerDirectoryIdentity = {
+  id: string;
   public_id: string;
   customer_id: string | null;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
 };
 
 function toDirectoryEntry(
@@ -34,7 +39,7 @@ export async function getAccountDirectory(): Promise<AccountDirectoryEntry[]> {
   try {
     const { data, error } = await supabase
       .from("customers")
-      .select("public_id, customer_id")
+      .select("id, public_id, customer_id, name, email, phone")
       .not("customer_id", "is", null)
       .limit(20)
       .returns<CustomerDirectoryIdentity[]>();
@@ -45,7 +50,7 @@ export async function getAccountDirectory(): Promise<AccountDirectoryEntry[]> {
       (data ?? []).map(async (identity) => {
         if (!identity.customer_id) return null;
         try {
-          const account = await getAccount360(identity.customer_id);
+          const account = await getCustomerAccount360(identity);
           return toDirectoryEntry(account, identity.public_id);
         } catch {
           return null;

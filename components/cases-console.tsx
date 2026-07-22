@@ -28,7 +28,6 @@ import type {
 import {
   buildCustomValuePayload,
   getCustomValueForField,
-  getStandardCaseValue,
   validateCustomFieldValue,
   type CaseCustomValue,
   type CaseFieldDefinition,
@@ -36,13 +35,17 @@ import {
   type ResolvedCaseAreaLayout,
 } from "@/lib/case-metadata";
 import type { CaseAssignmentResult, CaseOwnerType, DuplicateCaseResult } from "@/lib/case-ownership-types";
+import type {
+  CaseDetailFormSection,
+  CaseDetailSidebarField,
+  CaseDetailSidebarViewModel,
+} from "@/lib/case-detail-sidebar-types";
 import type { KnowledgeSuggestionPayload } from "@/lib/ai-knowledge-types";
 import { normalizeAircallPhone } from "@/lib/aircall";
 import {
   canEditCaseField,
   canViewCaseField,
   hasPermission,
-  standardCaseFieldKeys,
   type CrmCaseFieldPermissionRecord,
   type CrmRolePermissionRecord,
 } from "@/lib/permissions";
@@ -68,6 +71,7 @@ import {
   Paperclip,
   PhoneCall,
   Search,
+  Star,
   User,
   UserPlus,
   Wand2,
@@ -115,6 +119,8 @@ export type ConsoleCaseRecord = {
   case_number: string | null;
   customer_id: string | number | null;
   subject: string | null;
+  description?: string | null;
+  numero_caso_seguimiento?: string | null;
   channel: string | null;
   contact_type: string | null;
   status: string | null;
@@ -123,6 +129,7 @@ export type ConsoleCaseRecord = {
   priority: string | null;
   area: string | null;
   category: string | null;
+  cat_secundaria?: string | null;
   assigned_agent_id: string | null;
   owner_type?: CaseOwnerType | null;
   assigned_queue_id?: string | null;
@@ -1186,6 +1193,124 @@ function QuickCopyRow({
   );
 }
 
+function SidebarFieldRow({
+  field,
+  onCopy,
+}: {
+  field: CaseDetailSidebarField;
+  onCopy: (value: string, label: string) => void;
+}) {
+  if (field.fieldKey === "layout_spacer") {
+    return <div aria-hidden="true" className="h-3" />;
+  }
+
+  if (field.fieldType === "STARS") {
+    const score = typeof field.value === "number" ? field.value : null;
+    return (
+      <div className={originalStyles.quickCopyRow}>
+        <p className={`${originalStyles.quickCopyLabel} uppercase`}>{field.label}</p>
+        <div className="mt-1 flex items-center gap-0.5" aria-label={score ? `${score} de 5` : "Sin evaluación"}>
+          {[1, 2, 3, 4, 5].map((position) => (
+            <Star
+              key={position}
+              className={`h-3.5 w-3.5 ${
+                score !== null && position <= score
+                  ? "fill-amber-400 text-amber-400"
+                  : "fill-transparent text-[var(--g66-border)]"
+              }`}
+              aria-hidden="true"
+            />
+          ))}
+          <span className="ml-1 text-[10px] font-medium text-[var(--g66-text-muted)]">
+            {score === null ? "—" : `${score}/5`}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (field.fieldType === "CHECK" || field.fieldType === "BOOLEAN") {
+    return (
+      <div className={`${originalStyles.quickCopyRow} flex items-center justify-between gap-2`}>
+        <p className={`${originalStyles.quickCopyLabel} uppercase`}>{field.label}</p>
+        <span
+          className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${
+            field.status === "positive"
+              ? "bg-[var(--g66-success-soft)] text-[var(--g66-success)]"
+              : field.status === "negative"
+                ? "bg-[var(--g66-danger-soft)] text-[var(--g66-danger)]"
+                : "bg-[var(--g66-surface-soft)] text-[var(--g66-text-muted)]"
+          }`}
+          title={field.displayValue}
+        >
+          {field.status === "positive" ? (
+            <Check className="h-3 w-3" aria-hidden="true" />
+          ) : field.status === "negative" ? (
+            <X className="h-3 w-3" aria-hidden="true" />
+          ) : (
+            <span aria-hidden="true">—</span>
+          )}
+          <span className="sr-only">{field.displayValue}</span>
+        </span>
+      </div>
+    );
+  }
+
+  if (field.fieldType === "LINK") {
+    return (
+      <div className={originalStyles.quickCopyRow}>
+        <p className={`${originalStyles.quickCopyLabel} uppercase`}>{field.label}</p>
+        {field.href ? (
+          <a
+            href={field.href}
+            className={`${originalStyles.quickCopyValue} block truncate text-[var(--g66-brand-blue)] hover:underline`}
+          >
+            {field.displayValue}
+          </a>
+        ) : (
+          <p className={originalStyles.quickCopyValue}>{field.displayValue}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (field.isCopyable && field.copyValue) {
+    return (
+      <QuickCopyRow
+        label={field.label}
+        value={field.displayValue}
+        onCopy={() => onCopy(field.copyValue!, `${field.label} copiado`)}
+      />
+    );
+  }
+
+  return <Field label={field.label} value={field.displayValue} />;
+}
+
+function SidebarSectionFields({
+  fields,
+  onCopy,
+}: {
+  fields: CaseDetailSidebarField[];
+  onCopy: (value: string, label: string) => void;
+}) {
+  if (fields.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-2 text-[11px] text-[var(--g66-text-secondary)]">
+        No hay campos visibles configurados.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      {fields.map((field) => (
+        <SidebarFieldRow key={`${field.sourceType}:${field.fieldKey}`} field={field} onCopy={onCopy} />
+      ))}
+    </div>
+  );
+}
+
 function FormField({
   label,
   children,
@@ -1280,6 +1405,42 @@ function CustomFieldInput({
       className={inputClassName()}
     />
   );
+}
+
+function formSectionsToSaveTab(
+  sections: CaseDetailFormSection[],
+): CaseLayoutTabWithSections {
+  return {
+    id: "configured-case-form",
+    tab_key: "configured-case-form",
+    label: "Form",
+    sort_order: 0,
+    is_active: true,
+    sections: sections.map((section, sectionIndex) => ({
+      id: section.id,
+      tab_id: "configured-case-form",
+      label: section.name,
+      sort_order: (sectionIndex + 1) * 10,
+      is_active: true,
+      fields: section.items.flatMap((item, itemIndex) => {
+        if (item.type !== "FIELD" || item.field.sourceType !== "CASE") return [];
+        const definition = item.field.caseDefinition;
+        if (!definition) return [];
+        return [{
+          id: item.id,
+          section_id: section.id,
+          field_definition_id: definition.id,
+          sort_order: (itemIndex + 1) * 10,
+          column_span: item.columnSpan,
+          is_readonly: !item.editable,
+          field_definition: {
+            ...definition,
+            is_required: item.required,
+          },
+        }];
+      }),
+    })),
+  };
 }
 
 function inputClassName() {
@@ -1833,6 +1994,7 @@ export function CasesConsole({
   rolePermissions = [],
   caseFieldPermissions = [],
   initialSelectedCaseId,
+  initialSidebarViewModel,
 }: {
   cases: ConsoleCaseRecord[];
   messages: ConsoleMessageRecord[];
@@ -1841,6 +2003,7 @@ export function CasesConsole({
   rolePermissions?: CrmRolePermissionRecord[];
   caseFieldPermissions?: CrmCaseFieldPermissionRecord[];
   initialSelectedCaseId?: string;
+  initialSidebarViewModel: CaseDetailSidebarViewModel;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -1890,6 +2053,7 @@ export function CasesConsole({
   const [, setLayoutTabs] = useState<CaseLayoutTabWithSections[]>([]);
   const [areaLayoutTab, setAreaLayoutTab] = useState<CaseLayoutTabWithSections | null>(null);
   const [customValues, setCustomValues] = useState<CaseCustomValue[]>([]);
+  const [sidebarViewModel, setSidebarViewModel] = useState(initialSidebarViewModel);
   const [auditEvents, setAuditEvents] = useState<CaseAuditEvent[]>([]);
   const [aircallCalls, setAircallCalls] = useState<CaseCallRecord[]>([]);
   const [aiHistoryPayload, setAiHistoryPayload] =
@@ -1976,9 +2140,6 @@ export function CasesConsole({
     (fieldKey: string) =>
       canEditCaseFields && canEditCaseField(role, fieldKey, caseFieldPermissions),
     [canEditCaseFields, caseFieldPermissions, role],
-  );
-  const canEditAnyCaseInfoField = standardCaseFieldKeys.some((fieldKey) =>
-    canEditCaseInfoField(fieldKey),
   );
 
   useEffect(() => {
@@ -2469,7 +2630,7 @@ export function CasesConsole({
       const { data, error } = await supabaseBrowser
         .from("cases")
         .select(
-          "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
+          "id, case_number, customer_id, subject, description, numero_caso_seguimiento, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, cat_secundaria, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
         )
         .eq("id", selectedCaseId)
         .single<ConsoleCaseRecord>();
@@ -2850,6 +3011,30 @@ export function CasesConsole({
     filteredCases.find((caseItem) => caseItem.id === selectedCaseId) ??
     filteredCases[0] ??
     null;
+  const sidebarSectionsByKey = new Map(
+    sidebarViewModel.sections.map((section) => [section.sectionKey, section]),
+  );
+  const sidebarPermissionFieldByKey: Record<string, string> = {
+    email: "contact_email",
+    whatsapp: "contact_phone",
+    case_owner: "assigned_agent_id",
+    caso_borde: "is_edge_case",
+  };
+  const sidebarFields = (sectionKey: "CUSTOMER_INFO" | "CASE_INFO" | "CASE_PROPERTIES" | "CSAT") => {
+    const fields = sidebarSectionsByKey.get(sectionKey)?.fields ?? [];
+    if (sectionKey === "CUSTOMER_INFO" || sectionKey === "CSAT") return fields;
+    return fields.filter((field) =>
+      canViewCaseInfoField(sidebarPermissionFieldByKey[field.fieldKey] ?? field.fieldKey),
+    );
+  };
+  const editablePropertyFields = sidebarFields("CASE_PROPERTIES").filter(
+    (field) =>
+      field.sourceType === "CASE" &&
+      field.isEditable &&
+      field.caseDefinition &&
+      canEditCaseInfoField(field.fieldKey),
+  );
+  const canEditAnyCaseInfoField = editablePropertyFields.length > 0;
   const selectedCaseMessages = selectedCase
     ? messagesByCase.get(selectedCase.id) ?? []
     : [];
@@ -3344,6 +3529,14 @@ export function CasesConsole({
       return [...byField.values()];
     });
     window.dispatchEvent(new CustomEvent("case-custom-values-refresh"));
+    try {
+      await refreshSidebarViewModel(selectedCase.id);
+    } catch (refreshError) {
+      console.error("[cases-console] Error refreshing configured Form", {
+        caseId: selectedCase.id,
+        message: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+    }
     setIsCustomLayoutDirty(false);
     toast.success("✓ Valores guardados correctamente");
     setPendingAction(null);
@@ -3353,7 +3546,7 @@ export function CasesConsole({
     const { data, error } = await supabaseBrowser
       .from("cases")
       .select(
-        "id, case_number, customer_id, subject, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
+        "id, case_number, customer_id, subject, description, numero_caso_seguimiento, channel, contact_type, status, lifecycle_status, routing_status, priority, area, category, cat_secundaria, product, subproduct, is_edge_case, assigned_agent_id, owner_type, assigned_queue_id, assigned_to, assigned_at, duplicated_from_case_id, contact_name, contact_email, contact_phone, created_at, updated_at, closed_at, resolution_type, ai_summary, ai_category, ai_sentiment, ai_confidence, ai_resolution, customer:customers(name, email, phone, public_id), owner_queue:crm_queues(name, key)",
       )
       .eq("id", caseId)
       .single<ConsoleCaseRecord>();
@@ -3364,6 +3557,16 @@ export function CasesConsole({
 
     const mergedContext = await loadMergedIntoCaseReference(data);
     updateLocalCase(caseId, { ...data, ...mergedContext });
+    await refreshSidebarViewModel(caseId);
+  }
+
+  async function refreshSidebarViewModel(caseId: string) {
+    const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/sidebar`, {
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as CaseDetailSidebarViewModel & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "No se pudo refrescar el sidebar.");
+    setSidebarViewModel(payload);
   }
 
   async function startAircallCall(caseItem: ConsoleCaseRecord) {
@@ -3551,6 +3754,12 @@ export function CasesConsole({
         })),
     );
     await recordAuditEvents(auditEventsToCreate);
+    void refreshSidebarViewModel(selectedCase.id).catch((refreshError) => {
+      console.error("[cases-console] Error refreshing configurable sidebar", {
+        caseId: selectedCase.id,
+        message: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+    });
     toast.success(successMessage);
     void refreshWhatsappNotifications().catch((refreshError) => {
       console.error("[cases-console] Error refreshing WhatsApp notifications", {
@@ -3707,104 +3916,70 @@ export function CasesConsole({
     if (!selectedCase || !canEditCaseFields || pendingAction) return;
 
     const formData = new FormData(event.currentTarget);
-    const nextLifecycleStatus = String(
-      formData.get("lifecycle_status") || selectedLifecycleStatus,
-    ) as LifecycleStatus;
-    const nextRoutingStatus = String(
-      formData.get("routing_status") || selectedRoutingStatus,
-    );
-    const nextPriority = String(
-      formData.get("priority") || selectedCase.priority || "",
-    );
+    const errors: Record<string, string> = {};
+    const standardUpdates: Record<string, unknown> = {};
+    const customUpdates = editablePropertyFields.flatMap((sidebarField) => {
+      const field = sidebarField.caseDefinition;
+      if (!field) return [];
+      const fieldName = `detail:${field.id}`;
+      const rawValue = formData.get(fieldName);
+      const validationError = validateCustomFieldValue({ field, rawValue });
+      if (validationError) errors[field.id] = validationError;
 
-    if (
-      canEditCaseInfoField("lifecycle_status") &&
-      !lifecycleStatuses.includes(nextLifecycleStatus)
-    ) {
-      toast.error("✗ Estado operativo inválido");
-      return;
-    }
-    if (
-      canEditCaseInfoField("routing_status") &&
-      !routingStatusOptions.includes(nextRoutingStatus)
-    ) {
-      toast.error("✗ Estado de atención inválido");
-      return;
-    }
-    if (
-      canEditCaseInfoField("priority") &&
-      (!nextPriority || !priorityOptions.includes(nextPriority))
-    ) {
-      toast.error("✗ La prioridad es requerida");
+      if (field.is_standard !== false) {
+        const stringValue = typeof rawValue === "string" ? rawValue.trim() : "";
+        standardUpdates[field.field_key] = field.field_type === "boolean"
+          ? rawValue === "on" || rawValue === "true"
+          : field.field_type === "number" || field.field_type === "currency"
+            ? stringValue ? Number(stringValue) : null
+            : stringValue || null;
+        return [];
+      }
+
+      return [{
+        field,
+        payload: buildCustomValuePayload({ caseId: selectedCase.id, field, rawValue }),
+      }];
+    });
+
+    setCustomFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("✗ Revisa los campos obligatorios o inválidos");
       return;
     }
 
     setPendingAction("case-info");
-    const assignedAgentId = String(formData.get("assigned_agent_id") || "");
-    const resolutionType = String(formData.get("resolution_type") || "");
-    const values: Partial<ConsoleCaseRecord> = {};
+    try {
+      if (Object.keys(standardUpdates).length > 0) {
+        const { error } = await supabaseBrowser.from("cases").update({
+          ...standardUpdates,
+          updated_at: new Date().toISOString(),
+        }).eq("id", selectedCase.id);
+        if (error) throw error;
+        updateLocalCase(selectedCase.id, standardUpdates as Partial<ConsoleCaseRecord>);
+      }
 
-    if (canEditCaseInfoField("subject")) {
-      values.subject = String(formData.get("subject") || "");
-    }
-    if (canEditCaseInfoField("lifecycle_status")) {
-      values.lifecycle_status = nextLifecycleStatus;
-    }
-    if (canEditCaseInfoField("routing_status")) {
-      values.routing_status = nextRoutingStatus;
-    }
-    if (canEditCaseInfoField("priority")) {
-      values.priority = nextPriority;
-    }
-    if (canEditCaseInfoField("area")) {
-      values.area = String(formData.get("area") || "") || null;
-    }
-    if (canEditCaseInfoField("category")) {
-      values.category = String(formData.get("category") || "") || null;
-    }
-    if (canEditCaseInfoField("contact_type")) {
-      values.contact_type = String(formData.get("contact_type") || "") || null;
-    }
-    if (canEditCaseInfoField("assigned_agent_id")) {
-      values.owner_type = "USER";
-      values.assigned_agent_id = assignedAgentId || null;
-      values.assigned_queue_id = null;
-      values.assigned_to = assignedAgentId
-        ? agentNames.get(assignedAgentId) || null
-        : null;
-    }
-    if (canEditCaseInfoField("resolution_type")) {
-      values.resolution_type = resolutionType || null;
-    }
+      if (customUpdates.length > 0) {
+        const { data, error } = await supabaseBrowser.from("case_custom_values")
+          .upsert(customUpdates.map((update) => update.payload), {
+            onConflict: "case_id,field_definition_id",
+          }).select("*").returns<CaseCustomValue[]>();
+        if (error) throw error;
+        setCustomValues((current) => {
+          const valuesByDefinition = new Map(current.map((value) => [value.field_definition_id, value]));
+          (data ?? []).forEach((value) => valuesByDefinition.set(value.field_definition_id, value));
+          return [...valuesByDefinition.values()];
+        });
+      }
 
-    if (
-      canEditCaseInfoField("assigned_agent_id") &&
-      assignedAgentId &&
-      assignedAgentId !== selectedCase.assigned_agent_id
-    ) {
-      values.assigned_at = new Date().toISOString();
-    }
-
-    if (
-      canEditCaseInfoField("lifecycle_status") &&
-      nextLifecycleStatus === "CLOSED"
-    ) {
-      values.status = "CLOSED";
-      values.closed_at = selectedCase.closed_at || new Date().toISOString();
-      values.resolution_type =
-        values.resolution_type || selectedCase.resolution_type || "HUMAN_RESOLVED";
-    } else if (
-      canEditCaseInfoField("routing_status") &&
-      nextRoutingStatus !== "UNASSIGNED"
-    ) {
-      values.status = nextRoutingStatus;
-    }
-
-    const saved = await updateCase(values, "✓ Cambios guardados correctamente");
-    if (saved) {
+      await refreshSidebarViewModel(selectedCase.id);
       setIsCaseInfoEditing(false);
+      toast.success("✓ Propiedades guardadas correctamente");
+    } catch (error) {
+      toast.error(`✗ ${error instanceof Error ? error.message : "No se pudieron guardar las propiedades"}`);
+    } finally {
+      setPendingAction(null);
     }
-    setPendingAction(null);
   }
 
   async function sendTicketEmail(
@@ -4393,12 +4568,12 @@ export function CasesConsole({
             ) : null}
             <div className={`${originalStyles.sideStack} grid`}>
               <ModuleBox
-                title="Información del cliente"
+                title={sidebarSectionsByKey.get("CUSTOMER_INFO")?.title || "Información del cliente"}
                 icon={<User className="h-3.5 w-3.5" aria-hidden="true" />}
                 action={
-                  selectedCase.customer?.public_id ? (
+                  sidebarViewModel.customerPublicId || selectedCase.customer?.public_id ? (
                     <Link
-                      href={`/cuentas/${selectedCase.customer.public_id}`}
+                      href={`/cuentas/${sidebarViewModel.customerPublicId || selectedCase.customer?.public_id}`}
                       className="inline-flex items-center gap-1 rounded-full border border-[var(--g66-border)] bg-white px-2 py-0.5 text-[9px] font-semibold text-[var(--g66-brand-blue)] transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]"
                     >
                       Cliente 360
@@ -4411,11 +4586,10 @@ export function CasesConsole({
                   )
                 }
               >
-                <div className="grid gap-1.5">
-                  <QuickCopyRow label="Nombre" value={getCustomerLabel(selectedCase)} onCopy={() => copyQuickValue(getCustomerLabel(selectedCase), "Nombre copiado")} />
-                  <QuickCopyRow label="Email" value={getCustomerEmail(selectedCase)} onCopy={() => copyQuickValue(getCustomerEmail(selectedCase), "Correo copiado")} />
-                  <QuickCopyRow label="Teléfono" value={getCustomerPhone(selectedCase)} onCopy={() => copyQuickValue(getCustomerPhone(selectedCase), "Teléfono copiado")} />
-                </div>
+                <SidebarSectionFields
+                  fields={sidebarFields("CUSTOMER_INFO")}
+                  onCopy={copyQuickValue}
+                />
                 {canUseAircall ? (
                   <button
                     type="button"
@@ -4429,19 +4603,16 @@ export function CasesConsole({
                 ) : null}
               </ModuleBox>
               <ModuleBox
-                title="Información del caso"
+                title={sidebarSectionsByKey.get("CASE_INFO")?.title || "Información del caso"}
                 icon={<FileText className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <div className="grid gap-1.5">
-                  <QuickCopyRow label="Número de caso" value={formatCaseNumber(selectedCase.case_number, selectedCase.id)} onCopy={() => copyQuickValue(formatCaseNumber(selectedCase.case_number, selectedCase.id), "Número de caso copiado")} />
-                  <QuickCopyRow label="Correo" value={selectedCase.contact_email || getCustomerEmail(selectedCase)} onCopy={() => copyQuickValue(selectedCase.contact_email || getCustomerEmail(selectedCase), "Correo copiado")} />
-                  <QuickCopyRow label="Asunto" value={selectedCase.subject || "Sin asunto"} onCopy={() => copyQuickValue(selectedCase.subject || "Sin asunto", "Asunto copiado")} />
-                  <QuickCopyRow label="WhatsApp" value={selectedCase.contact_phone || getCustomerPhone(selectedCase)} onCopy={() => copyQuickValue(selectedCase.contact_phone || getCustomerPhone(selectedCase), "WhatsApp copiado")} />
-                  <QuickCopyRow label="ID técnico del caso" value={selectedCase.id} onCopy={() => copyQuickValue(selectedCase.id, "ID técnico copiado")} />
-                </div>
+                <SidebarSectionFields
+                  fields={sidebarFields("CASE_INFO")}
+                  onCopy={copyQuickValue}
+                />
               </ModuleBox>
               <ModuleBox
-                title="Propiedades Caso"
+                title={sidebarSectionsByKey.get("CASE_PROPERTIES")?.title || "Propiedades Caso"}
                 icon={<FileText className="h-3.5 w-3.5" aria-hidden="true" />}
                 action={
                   canEditAnyCaseInfoField ? (
@@ -4461,150 +4632,35 @@ export function CasesConsole({
                     onSubmit={saveCaseInfoForm}
                     className="grid gap-2"
                   >
-                    {canViewCaseInfoField("subject") ? (
-                      <FormField label="Asunto">
-                        <input
-                          name="subject"
-                          defaultValue={selectedCase.subject || ""}
-                          disabled={!canEditCaseInfoField("subject")}
-                          className={inputClassName()}
-                        />
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("area") ? (
-                      <FormField label="Área">
-                        <select
-                          name="area"
-                          defaultValue={selectedCase.area || ""}
-                          disabled={!canEditCaseInfoField("area")}
-                          className={inputClassName()}
-                        >
-                          <option value="">Sin área</option>
-                          {areaOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("category") ? (
-                      <FormField label="Categoría">
-                        <select
-                          name="category"
-                          defaultValue={selectedCase.category || ""}
-                          disabled={!canEditCaseInfoField("category")}
-                          className={inputClassName()}
-                        >
-                          <option value="">Sin categoría</option>
-                          {categoryOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("priority") ? (
-                      <FormField label="Prioridad">
-                        <select
-                          name="priority"
-                          defaultValue={selectedCase.priority || "MEDIUM"}
-                          disabled={!canEditCaseInfoField("priority")}
-                          required
-                          className={inputClassName()}
-                        >
-                          {priorityOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("lifecycle_status") ? (
-                      <FormField label="Lifecycle">
-                        <select
-                          name="lifecycle_status"
-                          defaultValue={selectedLifecycleStatus}
-                          disabled={!canEditCaseInfoField("lifecycle_status")}
-                          className={inputClassName()}
-                        >
-                          {lifecycleStatuses.map((status) => (
-                            <option key={status} value={status}>
-                              {status}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("routing_status") ? (
-                      <FormField label="Routing">
-                        <select
-                          name="routing_status"
-                          defaultValue={selectedRoutingStatus}
-                          disabled={!canEditCaseInfoField("routing_status")}
-                          className={inputClassName()}
-                        >
-                          {routingStatusOptions.map((status) => (
-                            <option key={status} value={status}>
-                              {status}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("contact_type") ? (
-                      <FormField label="Tipo de contacto">
-                        <select
-                          name="contact_type"
-                          defaultValue={selectedCase.contact_type || ""}
-                          disabled={!canEditCaseInfoField("contact_type")}
-                          className={inputClassName()}
-                        >
-                          <option value="">Sin tipo</option>
-                          {contactTypeOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("assigned_agent_id") ? (
-                      <FormField label="Agente asignado">
-                        <select
-                          name="assigned_agent_id"
-                          defaultValue={selectedCase.assigned_agent_id || ""}
-                          disabled={!canEditCaseInfoField("assigned_agent_id")}
-                          className={inputClassName()}
-                        >
-                          <option value="">Sin asignar</option>
-                          {agents.map((agent) => (
-                            <option key={agent.id} value={agent.id}>
-                              {agent.name || agent.email || agent.id}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
-                    {canViewCaseInfoField("resolution_type") ? (
-                      <FormField label="Resolución">
-                        <select
-                          name="resolution_type"
-                          defaultValue={selectedCase.resolution_type || ""}
-                          disabled={!canEditCaseInfoField("resolution_type")}
-                          className={inputClassName()}
-                        >
-                          <option value="">Sin resolución</option>
-                          {resolutionTypeOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </FormField>
-                    ) : null}
+                    {editablePropertyFields.map((sidebarField) => {
+                      const field = sidebarField.caseDefinition!;
+                      const name = `detail:${field.id}`;
+                      const value = sidebarField.value ?? "";
+                      return (
+                        <FormField key={field.id} label={field.label}>
+                          {field.field_type === "picklist" ? (
+                            <select name={name} defaultValue={String(value)} required={Boolean(field.is_required)} className={inputClassName()}>
+                              <option value="">Sin valor</option>
+                              {(field.picklist_values ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          ) : field.field_type === "boolean" ? (
+                            <input name={name} type="checkbox" defaultChecked={Boolean(value)} className="h-4 w-4 accent-[var(--g66-brand-blue)]" />
+                          ) : field.field_type === "textarea" ? (
+                            <textarea name={name} defaultValue={String(value)} required={Boolean(field.is_required)} className={`${inputClassName()} min-h-20 py-2`} />
+                          ) : (
+                            <input
+                              name={name}
+                              type={field.field_type === "number" || field.field_type === "currency" ? "number" : field.field_type === "datetime" ? "datetime-local" : field.field_type === "date" ? "date" : field.field_type === "email" ? "email" : field.field_type === "url" ? "url" : "text"}
+                              step={field.field_type === "currency" ? "0.01" : undefined}
+                              defaultValue={String(value)}
+                              required={Boolean(field.is_required)}
+                              className={inputClassName()}
+                            />
+                          )}
+                          {customFieldErrors[field.id] ? <span className="text-[10px] text-[var(--g66-danger)]">{customFieldErrors[field.id]}</span> : null}
+                        </FormField>
+                      );
+                    })}
                     <div className="mt-1 flex items-center justify-end gap-2">
                       <button
                         type="button"
@@ -4623,64 +4679,20 @@ export function CasesConsole({
                     </div>
                   </form>
                 ) : (
-                  <dl className="grid gap-2">
-                    {canViewCaseInfoField("subject") ? (
-                      <Field label="Asunto" value={selectedCase.subject || "Sin asunto"} />
-                    ) : null}
-                    {canViewCaseInfoField("area") ? (
-                      <Field label="Área" value={selectedCase.area || "Sin área"} />
-                    ) : null}
-                    {canViewCaseInfoField("category") ? (
-                      <Field
-                        label="CAT Secundaria"
-                        value={selectedCase.category || "Sin categoría"}
-                      />
-                    ) : null}
-                    <Field label="CAT Principal" value={selectedCase.area || "Sin categoría"} />
-                    <Field label="CAT Extra" value={selectedCase.ai_category || "Sin categoría extra"} />
-                    <Field label="Producto" value={selectedCase.product || "Sin producto"} />
-                    <Field label="Subproducto" value={selectedCase.subproduct || "Sin subproducto"} />
-                    {canViewCaseInfoField("priority") ? (
-                      <Field
-                        label="Prioridad"
-                        value={selectedCase.priority || "Sin prioridad"}
-                      />
-                    ) : null}
-                    {canViewCaseInfoField("lifecycle_status") ? (
-                      <Field label="Lifecycle" value={selectedLifecycleStatus} />
-                    ) : null}
-                    {canViewCaseInfoField("routing_status") ? (
-                      <Field label="Routing" value={selectedRoutingStatus} />
-                    ) : null}
-                    {canViewCaseInfoField("resolution_type") ? (
-                      <Field
-                        label="Resolución"
-                        value={selectedCase.resolution_type || "Sin resolución"}
-                      />
-                    ) : null}
-                    {canViewCaseInfoField("contact_type") ? (
-                      <Field
-                        label="Tipo de contacto"
-                        value={selectedCase.contact_type || "Sin tipo"}
-                      />
-                    ) : null}
-                    {canViewCaseInfoField("assigned_agent_id") ? (
-                      <Field
-                        label="Agente asignado"
-                        value={getAgentLabel(selectedCase, agentNames)}
-                      />
-                    ) : null}
-                    <Field label="Caso Borde" value={selectedCase.is_edge_case ? "Sí" : "No"} />
-                  </dl>
+                  <SidebarSectionFields
+                    fields={sidebarFields("CASE_PROPERTIES")}
+                    onCopy={copyQuickValue}
+                  />
                 )}
               </ModuleBox>
               <ModuleBox
-                title="CSAT"
+                title={sidebarSectionsByKey.get("CSAT")?.title || "CSAT"}
                 icon={<CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-2 text-[11px] font-normal leading-4 text-[var(--g66-text-secondary)]">
-                  No hay resultados de CSAT asociados a este caso.
-                </p>
+                <SidebarSectionFields
+                  fields={sidebarFields("CSAT")}
+                  onCopy={copyQuickValue}
+                />
               </ModuleBox>
             </div>
           </aside>
@@ -5325,9 +5337,9 @@ export function CasesConsole({
 
                     {workTab === "form" ? (
                       (() => {
-                        const layoutTab = areaLayoutTab;
+                        const formSections = sidebarViewModel.formSections;
 
-                        if (!layoutTab) {
+                        if (formSections.length === 0) {
                           return (
                             <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
                               No hay layout configurado para esta área.
@@ -5335,82 +5347,100 @@ export function CasesConsole({
                           );
                         }
 
-                        const valuesByField = new Map(
-                          customValues.map((value) => [
-                            value.field_definition_id,
-                            value,
-                          ]),
+                        const saveTab = formSectionsToSaveTab(formSections);
+                        const hasEditableFields = formSections.some((section) =>
+                          section.items.some((item) =>
+                            item.type === "FIELD" &&
+                            item.editable &&
+                            item.field.sourceType === "CASE" &&
+                            Boolean(item.field.caseDefinition) &&
+                            canEditCaseInfoField(item.field.fieldKey),
+                          ),
                         );
 
                         return (
                           <form
-                            key={`${selectedCase.id}-${layoutTab.id}`}
+                            key={`${selectedCase.id}-${sidebarViewModel.area}-configured-form`}
                             onSubmit={(event) =>
-                              saveCustomLayoutFields(event, layoutTab)
+                              saveCustomLayoutFields(event, saveTab)
                             }
                             onChange={() => setIsCustomLayoutDirty(true)}
                             className="flex min-h-0 flex-1 flex-col bg-[var(--g66-background)]"
                           >
                             <div className="min-h-0 flex-1 overflow-y-auto p-3">
                               <div className="grid gap-3">
-                                {layoutTab.sections.map((section) => (
+                                {formSections.map((section) => (
                                   <section
                                     key={section.id}
                                     className="rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm"
                                   >
                                     <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--g66-brand-blue)]">
-                                      {section.label}
+                                      {section.name}
                                     </h3>
+                                    {section.description ? (
+                                      <p className="mt-1 text-xs text-[var(--g66-text-secondary)]">
+                                        {section.description}
+                                      </p>
+                                    ) : null}
                                     <div className="mt-3 grid gap-3 md:grid-cols-2">
-                                      {section.fields.map((layoutField) => {
-                                        const field = layoutField.field_definition;
+                                      {section.items.map((item) => {
+                                        if (item.type === "SPACER") {
+                                          return (
+                                            <div
+                                              key={item.id}
+                                              aria-hidden="true"
+                                              className={`hidden min-h-9 md:block ${
+                                                item.columnSpan === 2 ? "md:col-span-2" : ""
+                                              }`}
+                                            />
+                                          );
+                                        }
 
+                                        const sidebarField = item.field;
+                                        const field = sidebarField.caseDefinition;
                                         if (
-                                          !field ||
-                                          !canViewCaseInfoField(field.field_key)
+                                          sidebarField.sourceType === "CASE" &&
+                                          !canViewCaseInfoField(sidebarField.fieldKey)
                                         ) {
                                           return null;
                                         }
-
-                                        const value = field.is_standard
-                                          ? getStandardCaseValue(
-                                              selectedCase as unknown as Record<
-                                                string,
-                                                unknown
-                                              >,
-                                              field,
-                                            )
-                                          : getCustomValueForField(
-                                              field,
-                                              valuesByField.get(field.id),
-                                            );
-                                        const error = customFieldErrors[field.id];
+                                        const isEditable = Boolean(
+                                          field &&
+                                          item.editable &&
+                                          sidebarField.sourceType === "CASE" &&
+                                          canEditCaseInfoField(sidebarField.fieldKey),
+                                        );
+                                        const error = field ? customFieldErrors[field.id] : null;
 
                                         return (
                                           <div
-                                            key={layoutField.id}
+                                            key={item.id}
                                             className={
-                                              layoutField.column_span === 2
+                                              item.columnSpan === 2
                                                 ? "md:col-span-2"
                                                 : ""
                                             }
                                           >
-                                            <FormField
-                                              label={`${field.label}${
-                                                field.is_required ? " *" : ""
-                                              }`}
-                                            >
-                                              <CustomFieldInput
-                                                field={field}
-                                                value={value}
-                                                disabled={
-                                                  Boolean(layoutField.is_readonly) ||
-                                                  !canEditCaseInfoField(field.field_key)
-                                                }
-                                              />
-                                            </FormField>
-                                            {field.description ? (
-                                              <p className="mt-1 text-xs font-semibold text-[var(--g66-text-secondary)]">
+                                            {isEditable && field ? (
+                                              <FormField
+                                                label={`${sidebarField.label}${item.required ? " *" : ""}`}
+                                              >
+                                                <CustomFieldInput
+                                                  field={{ ...field, is_required: item.required }}
+                                                  value={sidebarField.value}
+                                                  disabled={false}
+                                                />
+                                              </FormField>
+                                            ) : (
+                                              <div className="rounded-md border border-[var(--g66-border)] bg-[var(--g66-background)] px-3 py-2">
+                                                <SidebarFieldRow
+                                                  field={sidebarField}
+                                                  onCopy={copyQuickValue}
+                                                />
+                                              </div>
+                                            )}
+                                            {field?.description && isEditable ? (
+                                              <p className="mt-1 text-xs font-medium text-[var(--g66-text-secondary)]">
                                                 {field.description}
                                               </p>
                                             ) : null}
@@ -5433,18 +5463,7 @@ export function CasesConsole({
                                 disabled={
                                   pendingAction !== null ||
                                   !isCustomLayoutDirty ||
-                                  !layoutTab.sections.some((section) =>
-                                    section.fields.some((layoutField) => {
-                                      const field = layoutField.field_definition;
-
-                                      return (
-                                        field &&
-                                        !layoutField.is_readonly &&
-                                        canViewCaseInfoField(field.field_key) &&
-                                        canEditCaseInfoField(field.field_key)
-                                      );
-                                    }),
-                                  )
+                                  !hasEditableFields
                                 }
                                 className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--g66-brand-blue)] px-4 text-xs font-semibold text-white hover:bg-[var(--g66-accent-cyan)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]"
                               >

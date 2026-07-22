@@ -8,12 +8,19 @@ import type {
   CaseLayoutTab,
 } from "@/lib/case-metadata";
 import { supabase } from "@/lib/supabase";
+import { listCaseDetailSectionConfiguration } from "@/lib/case-detail-section-config-service";
+import { listCaseAreaLayouts } from "@/lib/case-area-layout-service";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function CaseObjectSettingsPage() {
-  const [fieldsResult, tabsResult, sectionsResult, layoutFieldsResult] =
+export default async function CaseObjectSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const [fieldsResult, tabsResult, sectionsResult, layoutFieldsResult, detailResult, formLayoutsResult] =
     await Promise.all([
       supabase
         .from("case_field_definitions")
@@ -35,6 +42,18 @@ export default async function CaseObjectSettingsPage() {
         .select("*")
         .order("sort_order", { ascending: true })
         .returns<CaseLayoutField[]>(),
+      listCaseDetailSectionConfiguration("GENERAL")
+        .then((data) => ({ data, error: null as string | null }))
+        .catch((error: unknown) => ({
+          data: null,
+          error: error instanceof Error ? error.message : "No se pudo cargar el layout de detalle.",
+        })),
+      listCaseAreaLayouts()
+        .then((data) => ({ data, error: null as string | null }))
+        .catch((error: unknown) => ({
+          data: null,
+          error: error instanceof Error ? error.message : "No se pudo cargar el layout Form.",
+        })),
     ]);
 
   const error =
@@ -42,13 +61,19 @@ export default async function CaseObjectSettingsPage() {
     tabsResult.error?.message ??
     sectionsResult.error?.message ??
     layoutFieldsResult.error?.message ??
+    detailResult.error ??
+    formLayoutsResult.error ??
     null;
 
   return (
     <>
       <PageHeader
-        title="Objeto Caso"
-        description="Administra campos personalizados y layouts metadata-driven para casos."
+        compact={tab === "layout-detalle"}
+        eyebrow={tab === "layout-detalle" ? "" : "CRM"}
+        title={tab === "layout-detalle" ? "Layout del detalle por área" : "Objeto Caso"}
+        description={tab === "layout-detalle"
+          ? "Diseña y organiza los campos que se muestran en el detalle del caso."
+          : "Administra campos personalizados y layouts metadata-driven para casos."}
         action={
           <Link
             href="/configuracion"
@@ -70,6 +95,9 @@ export default async function CaseObjectSettingsPage() {
             tabs={tabsResult.data ?? []}
             sections={sectionsResult.data ?? []}
             layoutFields={layoutFieldsResult.data ?? []}
+            detailConfiguration={detailResult.data!}
+            formLayouts={formLayoutsResult.data!.layouts}
+            initialManagerTab={tab === "layout-detalle" ? "detail-layout" : "fields"}
           />
         )}
       </RoleGuard>

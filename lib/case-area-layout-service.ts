@@ -7,13 +7,21 @@ import type {
   ResolvedCaseAreaLayout,
 } from "@/lib/case-metadata";
 import { supabase } from "@/lib/supabase";
+import {
+  legacyFieldsToCaseFormSchema,
+  normalizeCaseFormLayoutSchema,
+  projectLegacyCaseFields,
+  schemaForCaseAreaLayout,
+  type CaseFormLayoutSchema,
+} from "@/lib/case-form-layout";
 
 export type CaseAreaLayoutInput = {
   area: string;
   name: string;
   description?: string | null;
   is_active?: boolean;
-  fields: CaseAreaLayoutField[];
+  fields?: CaseAreaLayoutField[];
+  layoutSchema?: CaseFormLayoutSchema;
   updated_by?: string | null;
 };
 
@@ -22,7 +30,7 @@ export class CaseAreaLayoutServiceError extends Error {}
 function normalizeInput(input: CaseAreaLayoutInput) {
   const area = input.area.trim().toUpperCase();
   const name = input.name.trim();
-  const fields = input.fields
+  const legacyFields = (input.fields ?? [])
     .filter((field) => field.fieldKey.trim())
     .map((field, index) => ({
       fieldKey: field.fieldKey.trim(),
@@ -32,6 +40,9 @@ function normalizeInput(input: CaseAreaLayoutInput) {
       editable: field.editable !== false,
     }))
     .sort((left, right) => left.order - right.order);
+  const layoutSchema = normalizeCaseFormLayoutSchema(input.layoutSchema) ??
+    legacyFieldsToCaseFormSchema(legacyFields, name || "Formulario", input.description?.trim() || null);
+  const fields = projectLegacyCaseFields(layoutSchema);
 
   if (!area || !name) {
     throw new CaseAreaLayoutServiceError("Área y nombre son obligatorios.");
@@ -43,6 +54,7 @@ function normalizeInput(input: CaseAreaLayoutInput) {
     description: input.description?.trim() || null,
     is_active: input.is_active !== false,
     fields,
+    layout_schema: layoutSchema,
     updated_by: input.updated_by?.trim() || null,
   };
 }
@@ -74,12 +86,17 @@ export async function listCaseAreaLayouts() {
 
 export async function getCaseAreaLayout(area: string): Promise<ResolvedCaseAreaLayout | null> {
   const normalizedArea = area.trim().toUpperCase();
-  const { data: layout, error } = await supabase
+  const loadArea = (areaKey: string) => supabase
     .from("case_area_layouts")
     .select("*")
-    .eq("area", normalizedArea)
+    .eq("area", areaKey)
     .eq("is_active", true)
     .maybeSingle<CaseAreaLayout>();
+  const initialResult = await loadArea(normalizedArea);
+  const fallbackResult = !initialResult.error && !initialResult.data && normalizedArea !== "GENERAL"
+    ? await loadArea("GENERAL")
+    : initialResult;
+  const { data: layout, error } = fallbackResult;
 
   if (error) throw new CaseAreaLayoutServiceError("No se pudo cargar el layout.");
   if (!layout) return null;
@@ -98,7 +115,11 @@ export async function getCaseAreaLayout(area: string): Promise<ResolvedCaseAreaL
     throw new CaseAreaLayoutServiceError("No se pudieron resolver los campos del layout.");
   }
 
-  return { ...layout, fieldDefinitions: definitions ?? [] };
+  return {
+    ...layout,
+    formSchema: schemaForCaseAreaLayout(layout),
+    fieldDefinitions: definitions ?? [],
+  };
 }
 
 export async function createCaseAreaLayout(input: CaseAreaLayoutInput) {
@@ -124,4 +145,12 @@ export async function updateCaseAreaLayout(id: string, input: CaseAreaLayoutInpu
 
   if (error) throw new CaseAreaLayoutServiceError(error.message);
   return data;
+}
+
+export async function deactivateCaseAreaLayout(id: string) {
+  const { error } = await supabase
+    .from("case_area_layouts")
+    .update({ is_active: false })
+    .eq("id", id);
+  if (error) throw new CaseAreaLayoutServiceError(error.message);
 }

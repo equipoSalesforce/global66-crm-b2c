@@ -4,6 +4,7 @@ import {
   caseFieldTypes,
   normalizeFieldKey,
   type CaseFieldDefinition,
+  type CaseAreaLayout,
   type CaseFieldType,
   type CaseLayoutField,
   type CaseLayoutSection,
@@ -33,15 +34,20 @@ import {
 import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
 import { useToast } from "./toast-provider";
+import { CaseDetailSectionBuilder } from "./case-detail-section-builder";
+import type { CaseDetailSectionConfiguration } from "@/lib/case-detail-sidebar-types";
 
 type CaseObjectConfiguratorProps = {
   fields: CaseFieldDefinition[];
   tabs: CaseLayoutTab[];
   sections: CaseLayoutSection[];
   layoutFields: CaseLayoutField[];
+  detailConfiguration: CaseDetailSectionConfiguration;
+  formLayouts: CaseAreaLayout[];
+  initialManagerTab?: ManagerTab;
 };
 
-type ManagerTab = "summary" | "fields" | "layouts" | "picklists" | "validations";
+type ManagerTab = "summary" | "fields" | "layouts" | "detail-layout" | "picklists" | "validations";
 type FieldModalMode = "create" | "edit";
 type FieldDraft = {
   id?: string;
@@ -64,6 +70,7 @@ const managerTabs: {
   { key: "summary", label: "Resumen", icon: FileText },
   { key: "fields", label: "Campos", icon: Settings2 },
   { key: "layouts", label: "Layouts", icon: Layers3 },
+  { key: "detail-layout", label: "Layout detalle", icon: Columns2 },
   { key: "picklists", label: "Picklists", icon: Tags },
   { key: "validations", label: "Validaciones simples", icon: ListChecks },
 ];
@@ -165,10 +172,13 @@ export function CaseObjectConfigurator({
   tabs,
   sections,
   layoutFields,
+  detailConfiguration,
+  formLayouts,
+  initialManagerTab = "fields",
 }: CaseObjectConfiguratorProps) {
   const router = useRouter();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<ManagerTab>("fields");
+  const [activeTab, setActiveTab] = useState<ManagerTab>(initialManagerTab);
   const [isFieldModalOpen, setIsFieldModalOpen] = useState(false);
   const [fieldModalMode, setFieldModalMode] = useState<FieldModalMode>("create");
   const [fieldDraft, setFieldDraft] = useState<FieldDraft>(emptyFieldDraft());
@@ -489,7 +499,7 @@ export function CaseObjectConfigurator({
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+    <div className={`grid ${activeTab === "detail-layout" ? "gap-3 lg:grid-cols-[180px_minmax(0,1fr)]" : "gap-5 lg:grid-cols-[220px_minmax(0,1fr)]"}`}>
       <aside className="h-fit rounded-lg border border-[var(--g66-border)] bg-white p-2 shadow-sm">
         <div className="border-b border-[var(--g66-border)] px-3 py-3">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--g66-text-secondary)]">
@@ -848,6 +858,13 @@ export function CaseObjectConfigurator({
                 })}
             </div>
           </div>
+        ) : null}
+
+        {activeTab === "detail-layout" ? (
+          <CaseDetailSectionBuilder
+            initialConfiguration={detailConfiguration}
+            initialFormLayouts={formLayouts}
+          />
         ) : null}
 
         {activeTab === "picklists" ? (
