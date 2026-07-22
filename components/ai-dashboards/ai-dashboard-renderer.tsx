@@ -3,7 +3,7 @@
 import { BarChart3, Clock3, Inbox, List, PieChart, RefreshCw, TrendingUp } from "lucide-react";
 import type { SafeDashboardDefinition, SafeDashboardWidget, WidgetData } from "@/lib/analytics/semantic-layer";
 
-const palette = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316", "#64748b"];
+const palette = ["var(--g66-brand-blue)", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316", "#64748b"];
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("es-CL").format(value);
@@ -47,7 +47,7 @@ function LineWidget({ series }: { series: WidgetData["series"] }) {
   const x = (index: number) => 24 + index / (ordered.length - 1) * 352;
   const y = (value: number) => 118 - value / max * 88;
   const points = ordered.map((item, index) => `${x(index)},${y(item.value)}`).join(" ");
-  return <svg viewBox="0 0 400 150" className="h-44 w-full" role="img" aria-label="Gráfico de tendencia">{[30, 60, 90, 120].map((lineY) => <line key={lineY} x1="20" x2="380" y1={lineY} y2={lineY} stroke="#e2e8f0" />)}<polyline points={`24,120 ${points} 376,120`} fill="#dbeafe" opacity="0.65" stroke="none" /><polyline points={points} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />{ordered.map((item, index) => <g key={`${item.label}-${index}`}><circle cx={x(index)} cy={y(item.value)} r="4" fill="white" stroke="#2563eb" strokeWidth="2" /><text x={x(index)} y="143" textAnchor="middle" fontSize="9" fill="#64748b">{item.label.slice(0, 9)}</text></g>)}</svg>;
+  return <svg viewBox="0 0 400 150" className="h-44 w-full" role="img" aria-label="Gráfico de tendencia">{[30, 60, 90, 120].map((lineY) => <line key={lineY} x1="20" x2="380" y1={lineY} y2={lineY} stroke="#e2e8f0" />)}<polyline points={`24,120 ${points} 376,120`} fill="var(--g66-brand-blue-soft)" opacity="0.65" stroke="none" /><polyline points={points} fill="none" stroke="var(--g66-brand-blue)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />{ordered.map((item, index) => <g key={`${item.label}-${index}`}><circle cx={x(index)} cy={y(item.value)} r="4" fill="white" stroke="var(--g66-brand-blue)" strokeWidth="2" /><text x={x(index)} y="143" textAnchor="middle" fontSize="9" fill="#64748b">{item.label.slice(0, 9)}</text></g>)}</svg>;
 }
 
 function TableWidget({ data }: { data: WidgetData }) {

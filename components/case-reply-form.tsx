@@ -559,7 +559,7 @@ export function CaseReplyForm({
         <button
           type="submit"
           disabled={!canSend}
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-transparent bg-[var(--g66-brand-blue)] px-4 text-sm font-bold text-white shadow-[0_10px_24px_rgb(32_94_241/0.22)] transition hover:bg-[var(--g66-brand-blue-hover)] disabled:cursor-not-allowed disabled:border-[var(--g66-border)] disabled:bg-[var(--g66-border)] disabled:text-[var(--g66-text-muted)] disabled:shadow-none"
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-transparent bg-[var(--g66-brand-blue)] px-4 text-sm font-bold text-white shadow-[0_10px_24px_rgb(var(--crm-primary-rgb)/0.22)] transition hover:bg-[var(--g66-brand-blue-hover)] disabled:cursor-not-allowed disabled:border-[var(--g66-border)] disabled:bg-[var(--g66-border)] disabled:text-[var(--g66-text-muted)] disabled:shadow-none"
         >
           <Send className="h-3.5 w-3.5" aria-hidden="true" />
           {isProcessingAudio ? "Procesando audio..." : isSending ? "Enviando..." : "Enviar"}

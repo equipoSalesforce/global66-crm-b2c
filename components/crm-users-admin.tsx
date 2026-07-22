@@ -333,7 +333,7 @@ export function CrmUsersAdmin({
           <button
             type="button"
             onClick={openCreateModal}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-5 text-sm font-bold text-white shadow-[0_14px_28px_rgb(32_94_241/0.2)] transition hover:bg-[var(--g66-brand-blue-hover)]"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-5 text-sm font-bold text-white shadow-[0_14px_28px_rgb(var(--crm-primary-rgb)/0.2)] transition hover:bg-[var(--g66-brand-blue-hover)]"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Nuevo usuario

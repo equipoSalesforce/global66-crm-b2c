@@ -711,7 +711,7 @@ export function DashboardOperational({
               </button>
               <Link
                 href="/casos"
-                className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-3 text-xs font-bold text-white shadow-[0_12px_24px_rgb(32_94_241/0.22)] hover:bg-[var(--g66-brand-blue-hover)]"
+                className="inline-flex h-9 items-center gap-2 rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-3 text-xs font-bold text-white shadow-[0_12px_24px_rgb(var(--crm-primary-rgb)/0.22)] hover:bg-[var(--g66-brand-blue-hover)]"
               >
                 <BriefcaseBusiness className="h-4 w-4" />
                 Ver casos

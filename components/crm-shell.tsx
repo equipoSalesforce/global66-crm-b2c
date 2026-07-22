@@ -293,7 +293,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                     aria-current={isActive ? "page" : undefined}
                     className={`flex h-10 items-center gap-3 rounded-[var(--g66-radius-md)] px-3 text-sm font-bold transition ${
                       isActive
-                        ? "bg-[var(--g66-brand-blue)] text-white shadow-[0_10px_22px_rgb(32_94_241/0.18)]"
+                        ? "bg-[var(--g66-brand-blue)] text-white shadow-[0_10px_22px_rgb(var(--crm-primary-rgb)/0.18)]"
                         : "text-[var(--g66-text-secondary)] hover:bg-[var(--g66-brand-blue-soft)] hover:text-[var(--g66-brand-blue)]"
                     } ${isSidebarCompact ? "justify-center px-0" : ""}`}
                     title={item.label}

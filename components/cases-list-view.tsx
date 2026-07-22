@@ -98,7 +98,7 @@ const metricIcons: Record<
 > = {
   total: {
     icon: <BarChart3 className="h-3.5 w-3.5" />,
-    className: "bg-[#EAF1FF] text-[#205EEF]",
+    className: "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]",
   },
   pending: {
     icon: <Clock3 className="h-3.5 w-3.5" />,
@@ -231,8 +231,8 @@ function ToolbarButton({
       onClick={onClick}
       className={
         variant === "primary"
-          ? "inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.22)] hover:bg-[#1548c7] disabled:cursor-not-allowed disabled:opacity-45"
-          : "inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#D6E0F5] bg-white px-3.5 text-xs font-bold text-[#205EEF] shadow-[0_1px_2px_rgba(15,23,42,.04)] hover:bg-[#F5F8FF] disabled:cursor-not-allowed disabled:opacity-45"
+          ? "inline-flex h-9 items-center gap-2 rounded-[9px] bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgb(var(--crm-primary-rgb)/0.22)] hover:bg-[var(--g66-brand-blue-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+          : "inline-flex h-9 items-center gap-2 rounded-[9px] border border-[var(--g66-brand-blue-border)] bg-white px-3.5 text-xs font-bold text-[var(--g66-brand-blue)] shadow-[0_1px_2px_rgba(15,23,42,.04)] hover:bg-[var(--g66-brand-blue-soft)] disabled:cursor-not-allowed disabled:opacity-45"
       }
     >
       {children}
@@ -322,7 +322,7 @@ function ViewConfigModal({
             <input
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF] focus:ring-2 focus:ring-blue-100"
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-blue-100"
               placeholder="Ej: Casos resueltos"
             />
           </label>
@@ -336,7 +336,7 @@ function ViewConfigModal({
                   privacy: event.target.value as CaseViewDraft["privacy"],
                 })
               }
-              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[var(--g66-brand-blue)]"
             >
               <option>Privada</option>
               <option>Equipo</option>
@@ -350,7 +350,7 @@ function ViewConfigModal({
               onChange={(event) =>
                 setDraft({ ...draft, description: event.target.value })
               }
-              className="min-h-20 rounded-lg border border-[#DDE5F1] px-3 py-2 text-sm font-medium normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF] focus:ring-2 focus:ring-blue-100"
+              className="min-h-20 rounded-lg border border-[#DDE5F1] px-3 py-2 text-sm font-medium normal-case tracking-normal text-slate-800 outline-none focus:border-[var(--g66-brand-blue)] focus:ring-2 focus:ring-blue-100"
               placeholder="Describe para qué sirve esta vista."
             />
           </label>
@@ -365,7 +365,7 @@ function ViewConfigModal({
                     event.target.value as CaseViewDraft["editableByOthers"],
                 })
               }
-              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[var(--g66-brand-blue)]"
             >
               <option>Sí</option>
               <option>No</option>
@@ -381,7 +381,7 @@ function ViewConfigModal({
                   sorting: event.target.value as CaseViewDraft["sorting"],
                 })
               }
-              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[#205EEF]"
+              className="h-10 rounded-lg border border-[#DDE5F1] px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-[var(--g66-brand-blue)]"
             >
               {Object.entries(sortingLabels).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -417,7 +417,7 @@ function ViewConfigModal({
                 <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-500">Disponibles</p>
                 <div className="min-h-52 space-y-1.5 rounded-lg border border-[#DDE5F1] bg-[#FBFCFE] p-2">
                   {columns.filter((column) => !draft.visibleColumns.includes(column.key)).map((column) => (
-                    <button key={column.key} type="button" onClick={() => addColumn(column.key)} className="flex w-full items-center justify-between rounded-md border border-[#EEF1F6] bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-[#BFD0F5] hover:text-[#205EEF]">
+                    <button key={column.key} type="button" onClick={() => addColumn(column.key)} className="flex w-full items-center justify-between rounded-md border border-[#EEF1F6] bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-[var(--g66-brand-blue-border)] hover:text-[var(--g66-brand-blue)]">
                       {column.label}<ArrowRight className="h-3.5 w-3.5" />
                     </button>
                   ))}
@@ -425,13 +425,13 @@ function ViewConfigModal({
               </div>
               <div>
                 <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-500">Visibles</p>
-                <div className="min-h-52 space-y-1.5 rounded-lg border border-[#BFD0F5] bg-[#F5F8FF] p-2">
+                <div className="min-h-52 space-y-1.5 rounded-lg border border-[var(--g66-brand-blue-border)] bg-[var(--g66-brand-blue-soft)] p-2">
                   {draft.visibleColumns.map((columnKey, index) => {
                     const column = columns.find((item) => item.key === columnKey);
                     if (!column) return null;
                     const mandatory = mandatoryCaseViewColumns.includes(columnKey);
                     return (
-                      <div key={columnKey} className="flex items-center gap-1 rounded-md border border-[#D6E0F5] bg-white px-2 py-1.5 text-xs font-semibold text-slate-700">
+                      <div key={columnKey} className="flex items-center gap-1 rounded-md border border-[var(--g66-brand-blue-border)] bg-white px-2 py-1.5 text-xs font-semibold text-slate-700">
                         <span className="w-5 text-[10px] font-black text-slate-400">{index + 1}</span>
                         <span className="min-w-0 flex-1 truncate">{column.label}</span>
                         {mandatory ? (
@@ -457,7 +457,7 @@ function ViewConfigModal({
               onChange={(event) =>
                 setDraft({ ...draft, useAsDefault: event.target.checked })
               }
-              className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
+              className="h-4 w-4 rounded border-slate-300 accent-[var(--g66-brand-blue)]"
             />
             Usar como vista por defecto
           </label>
@@ -473,7 +473,7 @@ function ViewConfigModal({
           <button
             type="button"
             onClick={onSave}
-            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgba(32,94,239,.2)] hover:bg-[#1548c7]"
+            className="h-9 rounded-lg bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgb(var(--crm-primary-rgb)/0.2)] hover:bg-[var(--g66-brand-blue-hover)]"
           >
             {actionLabel}
           </button>
@@ -575,10 +575,10 @@ function MergeCasesModal({
                         type="radio"
                         checked={masterCaseId === caseItem.id}
                         onChange={() => setMasterCaseId(caseItem.id)}
-                        className="accent-[#205EEF]"
+                        className="accent-[var(--g66-brand-blue)]"
                       />
                     </td>
-                    <td className="px-3 py-2 font-black text-[#205EEF]">{caseItem.number.replace("Caso ", "")}</td>
+                    <td className="px-3 py-2 font-black text-[var(--g66-brand-blue)]">{caseItem.number.replace("Caso ", "")}</td>
                     <td className="px-3 py-2">{caseItem.email}</td>
                     <td className="px-3 py-2">{caseItem.statusLabel}</td>
                     <td className="px-3 py-2">{caseItem.ownerName}</td>
@@ -597,7 +597,7 @@ function MergeCasesModal({
                 <select
                   value={String(fieldResolution[field.key] ?? "")}
                   onChange={(event) => setResolvedValue(field.key, event.target.value)}
-                  className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+                  className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[var(--g66-brand-blue)]"
                 >
                   {selectedCases.map((caseItem) => {
                     const value = field.getValue(caseItem);
@@ -624,7 +624,7 @@ function MergeCasesModal({
           <button
             type="button"
             onClick={confirmMerge}
-            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgba(32,94,239,.2)]"
+            className="h-9 rounded-lg bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white shadow-[0_10px_20px_rgb(var(--crm-primary-rgb)/0.2)]"
           >
             Fusionar casos
           </button>
@@ -666,7 +666,7 @@ function ChangeOwnerModal({
         <div className="grid gap-4 p-5">
           <div className="rounded-xl border border-[#E6EBF3] bg-[#FBFCFE] p-3 text-xs font-semibold text-slate-600">
             {selectedCases.slice(0, 6).map((caseItem) => (
-              <span key={caseItem.id} className="mr-2 inline-flex rounded-full bg-white px-2 py-1 text-[#205EEF]">
+              <span key={caseItem.id} className="mr-2 inline-flex rounded-full bg-white px-2 py-1 text-[var(--g66-brand-blue)]">
                 {caseItem.number.replace("Caso ", "")}
               </span>
             ))}
@@ -677,7 +677,7 @@ function ChangeOwnerModal({
             <select
               value={selectedOwnerId}
               onChange={(event) => setOwnerId(event.target.value)}
-              className="h-10 rounded-lg border border-[#DDE5F1] bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+              className="h-10 rounded-lg border border-[#DDE5F1] bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[var(--g66-brand-blue)]"
             >
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
@@ -691,7 +691,7 @@ function ChangeOwnerModal({
               type="checkbox"
               checked={notifyOwner}
               onChange={(event) => setNotifyOwner(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 accent-[#205EEF]"
+              className="h-4 w-4 rounded border-slate-300 accent-[var(--g66-brand-blue)]"
             />
             Notificar al nuevo owner
           </label>
@@ -704,7 +704,7 @@ function ChangeOwnerModal({
             type="button"
             disabled={!selectedOwnerId}
             onClick={() => onChangeOwner(selectedOwnerId, notifyOwner)}
-            className="h-9 rounded-lg bg-[#205EEF] px-4 text-xs font-bold text-white disabled:opacity-45"
+            className="h-9 rounded-lg bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white disabled:opacity-45"
           >
             Cambiar owner
           </button>
@@ -1019,7 +1019,7 @@ export function CasesListView({ data }: CasesListViewProps) {
       return (
         <Link
           href={`/casos/${row.id}`}
-          className="font-black text-[#205EEF] hover:underline"
+          className="font-black text-[var(--g66-brand-blue)] hover:underline"
         >
           {row.number.replace("Caso ", "")}
         </Link>
@@ -1057,7 +1057,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           onChange={(event) =>
             updateEditDraft(row.id, editableField.key, event.target.value)
           }
-          className="h-8 w-full min-w-[120px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+          className="h-8 w-full min-w-[120px] rounded-lg border border-[var(--g66-brand-blue-border)] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
         >
           {getPicklistOptions(fieldDefinition).map((option) => (
             <option key={option} value={option}>
@@ -1077,7 +1077,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           onChange={(event) =>
             updateEditDraft(row.id, editableField.key, event.target.value)
           }
-          className="h-8 w-full min-w-[150px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+          className="h-8 w-full min-w-[150px] rounded-lg border border-[var(--g66-brand-blue-border)] bg-white px-2 text-xs font-bold text-slate-700 outline-none"
         >
           <option value="">Sin owner</option>
           {assignableUsers.map((user) => (
@@ -1098,7 +1098,7 @@ export function CasesListView({ data }: CasesListViewProps) {
             updateEditDraft(row.id, editableField.key, event.target.checked)
           }
           aria-label={`Editar caso borde ${row.number}`}
-          className="h-4 w-4 rounded border-[#CBD5E1] text-[#205EEF]"
+          className="h-4 w-4 rounded border-[#CBD5E1] text-[var(--g66-brand-blue)]"
         />
       );
     }
@@ -1109,7 +1109,7 @@ export function CasesListView({ data }: CasesListViewProps) {
         onChange={(event) =>
           updateEditDraft(row.id, editableField.key, event.target.value)
         }
-        className="h-8 w-full min-w-[120px] rounded-lg border border-[#D6E0F5] bg-white px-2 text-xs font-semibold text-slate-700 outline-none"
+        className="h-8 w-full min-w-[120px] rounded-lg border border-[var(--g66-brand-blue-border)] bg-white px-2 text-xs font-semibold text-slate-700 outline-none"
       />
     );
   }
@@ -1282,7 +1282,7 @@ export function CasesListView({ data }: CasesListViewProps) {
               </ToolbarButton>
               <Link
                 href="/casos/nuevo"
-                className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgba(32,94,239,.24)] hover:bg-[#1548c7]"
+                className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white shadow-[0_12px_22px_rgb(var(--crm-primary-rgb)/0.24)] hover:bg-[var(--g66-brand-blue-hover)]"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Crear Caso
@@ -1296,7 +1296,7 @@ export function CasesListView({ data }: CasesListViewProps) {
             <button
               type="button"
               onClick={() => setIsViewListOpen((current) => !current)}
-              className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#205EEF] px-4 text-xs font-bold text-white shadow-[0_8px_18px_rgba(32,94,239,.18)] hover:bg-[#1548c7]"
+              className="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[var(--g66-brand-blue)] px-4 text-xs font-bold text-white shadow-[0_8px_18px_rgb(var(--crm-primary-rgb)/0.18)] hover:bg-[var(--g66-brand-blue-hover)]"
             >
               <List className="h-3.5 w-3.5" />
               Lista de Vistas
@@ -1306,7 +1306,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                 <button
                   type="button"
                   onClick={resetView}
-                  className="block w-full px-4 py-3 text-left text-xs font-bold text-slate-700 hover:bg-[#F5F8FF]"
+                  className="block w-full px-4 py-3 text-left text-xs font-bold text-slate-700 hover:bg-[var(--g66-brand-blue-soft)]"
                 >
                   Vista de Casos estándar
                 </button>
@@ -1315,9 +1315,9 @@ export function CasesListView({ data }: CasesListViewProps) {
                     key={view.id}
                     type="button"
                     onClick={() => applyView(view)}
-                    className={`block w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#F5F8FF] ${
+                    className={`block w-full px-4 py-3 text-left text-xs font-bold hover:bg-[var(--g66-brand-blue-soft)] ${
                       activeViewId === view.id
-                        ? "bg-[#F5F8FF] text-[#205EEF]"
+                        ? "bg-[var(--g66-brand-blue-soft)] text-[var(--g66-brand-blue)]"
                         : "text-slate-700"
                     }`}
                   >
@@ -1371,8 +1371,8 @@ export function CasesListView({ data }: CasesListViewProps) {
                 }
                 className={`min-h-[72px] rounded-xl border bg-white px-3.5 py-2.5 text-left shadow-[0_3px_10px_rgba(15,23,42,.04)] transition hover:-translate-y-0.5 ${
                   isActive
-                    ? "border-[#205EEF] bg-[#F5F8FF] shadow-[0_12px_26px_rgba(32,94,239,.13)]"
-                    : "border-[#E6EBF3] hover:border-[#D6E0F5]"
+                    ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue-soft)] shadow-[0_12px_26px_rgb(var(--crm-primary-rgb)/0.13)]"
+                    : "border-[#E6EBF3] hover:border-[var(--g66-brand-blue-border)]"
                 }`}
               >
                 <span className="flex items-start justify-between gap-3">
@@ -1445,7 +1445,7 @@ export function CasesListView({ data }: CasesListViewProps) {
         </div>
 
         {selectedCaseIds.size > 0 || isInlineEditing ? (
-          <div className="mb-3 rounded-xl border border-[#D6E0F5] bg-[#F5F8FF] px-4 py-2.5 text-xs font-bold text-[#205EEF]">
+          <div className="mb-3 rounded-xl border border-[var(--g66-brand-blue-border)] bg-[var(--g66-brand-blue-soft)] px-4 py-2.5 text-xs font-bold text-[var(--g66-brand-blue)]">
             {selectedCaseIds.size > 0 ? (
               <span>
                 {selectedCaseIds.size.toLocaleString("es-CL")} caso
@@ -1473,7 +1473,7 @@ export function CasesListView({ data }: CasesListViewProps) {
           <button
             type="button"
             onClick={() => openModal("edit")}
-            className="inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#D6E0F5] bg-[#F5F8FF] px-3.5 text-xs font-bold text-[#205EEF] shadow-[0_1px_2px_rgba(15,23,42,.03)]"
+            className="inline-flex h-9 items-center gap-2 rounded-[9px] border border-[var(--g66-brand-blue-border)] bg-[var(--g66-brand-blue-soft)] px-3.5 text-xs font-bold text-[var(--g66-brand-blue)] shadow-[0_1px_2px_rgba(15,23,42,.03)]"
           >
             <Filter className="h-3.5 w-3.5" />
             Más filtros
@@ -1491,7 +1491,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                       checked={allVisibleSelected}
                       onChange={toggleVisibleSelection}
                       aria-label="Seleccionar casos visibles"
-                      className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[#205EEF]"
+                      className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[var(--g66-brand-blue)]"
                     />
                   </th>
                   {visibleColumns.map((column) => (
@@ -1513,7 +1513,7 @@ export function CasesListView({ data }: CasesListViewProps) {
                         checked={selectedCaseIds.has(row.id)}
                         onChange={() => toggleCaseSelection(row.id)}
                         aria-label={`Seleccionar ${row.number}`}
-                        className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[#205EEF]"
+                        className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[var(--g66-brand-blue)]"
                       />
                     </td>
                     {visibleColumns.map((column) => (
@@ -1561,7 +1561,7 @@ export function CasesListView({ data }: CasesListViewProps) {
               <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E4E9F0] text-slate-400">
                 <ChevronLeft className="h-3.5 w-3.5" />
               </span>
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#205EEF] text-[11px] font-bold text-white">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] text-[11px] font-bold text-white">
                 1
               </span>
               <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E4E9F0] text-slate-400">
@@ -1651,7 +1651,7 @@ function ModalFilter({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[#205EEF]"
+        className="h-9 rounded-lg border border-[#DDE5F1] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-[var(--g66-brand-blue)]"
       >
         <option value="">Todos</option>
         {options.map((option) => (

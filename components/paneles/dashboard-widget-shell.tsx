@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-export const DASHBOARD_CHART_COLORS = ["#2f6fec", "#2c9b6f", "#7556d8", "#e58a3a", "#d66767", "#64748b", "#2395ad", "#ba9238"] as const;
+export const DASHBOARD_CHART_COLORS = ["var(--g66-brand-blue)", "#2c9b6f", "#7556d8", "#e58a3a", "#d66767", "#64748b", "#2395ad", "#ba9238"] as const;
 
 export function WidgetLegend({ data, showPercentage = true }: { data: Array<{ label: string; value: number }>; showPercentage?: boolean }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);

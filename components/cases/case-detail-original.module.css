@@ -1,8 +1,8 @@
 .detailRoot,
 .caseTopBar {
-  --case-accent: #2f6bff;
-  --case-accent-soft: #f1f5ff;
-  --case-accent-border: #cbd9ff;
+  --case-accent: #2746c7;
+  --case-accent-soft: rgb(39 70 199 / 10%);
+  --case-accent-border: rgb(39 70 199 / 24%);
   --case-background: #f4f6f9;
   --case-surface: #ffffff;
   --case-surface-soft: #f2f4f8;
@@ -21,7 +21,7 @@
   --case-warning: #b9770a;
 
   --g66-brand-blue: var(--case-accent);
-  --g66-brand-blue-hover: #1f52d6;
+  --g66-brand-blue-hover: #203aa8;
   --g66-brand-blue-soft: var(--case-accent-soft);
   --g66-background: var(--case-background);
   --g66-background-soft: var(--case-background);

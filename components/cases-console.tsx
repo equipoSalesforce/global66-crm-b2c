@@ -4304,7 +4304,7 @@ export function CasesConsole({
                 {canTakeCases ? (
                   <Link
                     href="/casos/nuevo"
-                    className="inline-flex h-8 flex-1 items-center justify-center rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-2 text-xs font-bold text-white shadow-[0_8px_18px_rgb(32_94_241/0.18)] transition hover:bg-[var(--g66-brand-blue-hover)]"
+                    className="inline-flex h-8 flex-1 items-center justify-center rounded-[var(--g66-radius-md)] bg-[var(--g66-brand-blue)] px-2 text-xs font-bold text-white shadow-[0_8px_18px_rgb(var(--crm-primary-rgb)/0.18)] transition hover:bg-[var(--g66-brand-blue-hover)]"
                   >
                     Crear caso
                   </Link>
@@ -4735,7 +4735,7 @@ export function CasesConsole({
                               <span
                                 className={`${originalStyles.stepperCircle} flex items-center justify-center rounded-full border transition ${
                                   isActive
-                                    ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue)] text-white shadow-[0_8px_18px_rgb(32_94_241/0.2)]"
+                                    ? "border-[var(--g66-brand-blue)] bg-[var(--g66-brand-blue)] text-white shadow-[0_8px_18px_rgb(var(--crm-primary-rgb)/0.2)]"
                                     : isPast
                                       ? "border-[var(--g66-success)] bg-[var(--g66-success)] text-white"
                                       : "border-[var(--g66-border)] bg-white text-[var(--g66-text-muted)]"
