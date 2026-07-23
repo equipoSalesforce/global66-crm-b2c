@@ -28,6 +28,7 @@ import type {
 import {
   buildCustomValuePayload,
   getCustomValueForField,
+  isCustomValueCaseField,
   validateCustomFieldValue,
   type CaseCustomValue,
   type CaseFieldDefinition,
@@ -2557,7 +2558,7 @@ export function CasesConsole({
         supabaseBrowser
           .from("case_layout_tabs")
           .select(
-            "id, tab_key, label, sort_order, is_active, created_at, sections:case_layout_sections(id, tab_id, label, sort_order, is_active, fields:case_layout_fields(id, section_id, field_definition_id, sort_order, column_span, is_readonly, field_definition:case_field_definitions(id, field_key, label, field_type, description, is_required, is_active, picklist_values, default_value, created_at, updated_at)))",
+            "id, tab_key, label, sort_order, is_active, created_at, sections:case_layout_sections(id, tab_id, label, sort_order, is_active, fields:case_layout_fields(id, section_id, field_definition_id, sort_order, column_span, is_readonly, field_definition:case_field_definitions(id, field_key, label, field_type, description, is_required, is_active, is_standard, storage_type, column_name, is_editable, is_filterable, is_list_visible, is_form_eligible, is_detail_eligible, is_system, sort_order, picklist_values, default_value, created_at, updated_at)))",
           )
           .eq("is_active", true)
           .order("sort_order", { ascending: true })
@@ -3379,7 +3380,7 @@ export function CasesConsole({
     const nextErrors: Record<string, string> = {};
     const standardCaseUpdates: Partial<ConsoleCaseRecord> = {};
     const customUpdates = editableFields
-      .filter((field) => !field.is_standard)
+      .filter(isCustomValueCaseField)
       .map((field) => {
         const fieldName = `custom:${field.id}`;
         const rawValue = formData.get(fieldName);
@@ -3926,7 +3927,7 @@ export function CasesConsole({
       const validationError = validateCustomFieldValue({ field, rawValue });
       if (validationError) errors[field.id] = validationError;
 
-      if (field.is_standard !== false) {
+      if (!isCustomValueCaseField(field)) {
         const stringValue = typeof rawValue === "string" ? rawValue.trim() : "";
         standardUpdates[field.field_key] = field.field_type === "boolean"
           ? rawValue === "on" || rawValue === "true"
@@ -4228,7 +4229,7 @@ export function CasesConsole({
     ? areaLayoutTab.sections.flatMap((section) =>
         section.fields.flatMap((layoutField) => {
           const field = layoutField.field_definition;
-          if (!field || field.is_standard) return [];
+          if (!field || !isCustomValueCaseField(field)) return [];
 
           return [
             {

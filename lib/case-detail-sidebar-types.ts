@@ -65,6 +65,7 @@ export type CaseDetailAvailableField = {
   isRequired: boolean;
   isActive: boolean;
   caseDefinition: CaseFieldDefinition | null;
+  supportedViews?: Array<"SIDEBAR" | "FORM">;
 };
 
 export type CaseDetailConfiguredField = {

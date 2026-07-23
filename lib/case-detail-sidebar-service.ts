@@ -17,7 +17,10 @@ import {
   type CustomerOperationalProfile,
 } from "@/lib/customer-profile-service";
 import { formatCaseNumber } from "@/lib/case-status";
-import type { CaseFieldDefinition } from "@/lib/case-metadata";
+import {
+  isCustomValueCaseField,
+  type CaseFieldDefinition,
+} from "@/lib/case-metadata";
 import { supabase } from "@/lib/supabase";
 
 type CaseSidebarRecord = {
@@ -97,7 +100,10 @@ function resolveCaseValue(
   const fieldKey = configuredField.fieldKey;
   if (fieldKey === "assigned_to") return ownerLabel;
   if (fieldKey === "attachment_link") return attachment?.filename ?? null;
-  if (configuredField.definition.caseDefinition?.is_standard === false) {
+  if (
+    configuredField.definition.caseDefinition &&
+    isCustomValueCaseField(configuredField.definition.caseDefinition)
+  ) {
     return customValues.get(fieldKey) ?? null;
   }
   return caseItem[fieldKey] ?? null;
@@ -234,7 +240,7 @@ export async function getCaseDetailSidebarViewModel(
   ]
     .map((field) => field?.caseDefinition)
     .filter((definition): definition is CaseFieldDefinition =>
-      Boolean(definition && definition.is_standard === false && definition.field_key !== "attachment_link"),
+      Boolean(definition && isCustomValueCaseField(definition) && definition.field_key !== "attachment_link"),
     );
   const uniqueCustomDefinitions = [...new Map(customDefinitions.map((field) => [field.id, field])).values()];
   const { data: customValueRows, error: customValuesError } = uniqueCustomDefinitions.length

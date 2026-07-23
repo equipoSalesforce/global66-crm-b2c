@@ -2,6 +2,7 @@
 
 import {
   caseFieldTypes,
+  isCustomValueCaseField,
   normalizeFieldKey,
   type CaseFieldDefinition,
   type CaseAreaLayout,
@@ -188,8 +189,11 @@ export function CaseObjectConfigurator({
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [newSectionLabel, setNewSectionLabel] = useState("");
 
-  const standardFields = fields.filter((field) => field.is_standard);
-  const customFields = fields.filter((field) => !field.is_standard);
+  const isSystemField = (field: CaseFieldDefinition) =>
+    Boolean(field.is_system) || field.is_editable === false;
+  const systemFields = fields.filter(isSystemField);
+  const standardFields = fields.filter((field) => field.is_standard && !isSystemField(field));
+  const customFields = fields.filter((field) => isCustomValueCaseField(field) && !isSystemField(field));
   const fieldById = useMemo(
     () => new Map(fields.map((field) => [field.id, field])),
     [fields],
@@ -269,6 +273,15 @@ export function CaseObjectConfigurator({
             field_key: fieldKey,
             field_type: fieldDraft.fieldType,
             is_standard: false,
+            storage_type: "CUSTOM_VALUE",
+            column_name: null,
+            is_editable: true,
+            is_filterable: true,
+            is_list_visible: true,
+            is_form_eligible: true,
+            is_detail_eligible: true,
+            is_system: false,
+            sort_order: Math.max(1000, ...fields.map((field) => field.sort_order ?? 0)) + 10,
           });
 
     if (result.error) {
@@ -287,7 +300,7 @@ export function CaseObjectConfigurator({
   }
 
   async function deactivateField(field: CaseFieldDefinition) {
-    if (field.is_standard) return;
+    if (!isCustomValueCaseField(field) || isSystemField(field)) return;
 
     const { error } = await supabaseBrowser
       .from("case_field_definitions")
@@ -305,7 +318,7 @@ export function CaseObjectConfigurator({
   }
 
   async function deleteField(field: CaseFieldDefinition) {
-    if (field.is_standard) return;
+    if (!isCustomValueCaseField(field) || isSystemField(field)) return;
 
     const { error } = await supabaseBrowser
       .from("case_field_definitions")
@@ -446,8 +459,8 @@ export function CaseObjectConfigurator({
           {field.field_type}
         </td>
         <td className="px-4 py-3">
-          <Badge tone={field.is_standard ? "blue" : "green"}>
-            {field.is_standard ? "Estándar" : "Personalizado"}
+          <Badge tone={isSystemField(field) ? "amber" : field.is_standard ? "blue" : "green"}>
+            {isSystemField(field) ? "Sistema / sólo lectura" : field.is_standard ? "Estándar" : "Personalizado"}
           </Badge>
         </td>
         <td className="px-4 py-3">
@@ -472,7 +485,7 @@ export function CaseObjectConfigurator({
               <Pencil className="h-3.5 w-3.5" />
               Editar
             </button>
-            {!field.is_standard ? (
+            {isCustomValueCaseField(field) && !isSystemField(field) ? (
               <>
                 <button
                   type="button"
@@ -545,10 +558,11 @@ export function CaseObjectConfigurator({
                 </p>
               </div>
             </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-4">
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {[
                 ["Campos estándar", standardFields.length],
                 ["Campos personalizados", customFields.length],
+                ["Sistema / sólo lectura", systemFields.length],
                 ["Tabs", tabs.length],
                 ["Secciones", sections.length],
               ].map(([label, value]) => (
@@ -567,7 +581,7 @@ export function CaseObjectConfigurator({
               <div>
                 <h2 className="text-lg font-bold text-[var(--g66-text-primary)]">Campos</h2>
                 <p className="text-sm font-semibold text-[var(--g66-text-secondary)]">
-                  Filas compactas para campos estándar y personalizados.
+                  Catálogo único de campos estándar, personalizados y de sistema.
                 </p>
               </div>
               <button
@@ -624,6 +638,30 @@ export function CaseObjectConfigurator({
                     </tr>
                   </thead>
                   <tbody>{renderFieldRows(customFields)}</tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="overflow-hidden rounded-lg border border-[var(--g66-border)] bg-white shadow-sm">
+              <div className="border-b border-[var(--g66-border)] px-4 py-3">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-[var(--g66-warning-text)]">
+                  Campos de sistema / sólo lectura
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-[var(--g66-border)] bg-[var(--g66-background)] text-xs uppercase tracking-wide text-[var(--g66-text-secondary)]">
+                    <tr>
+                      <th className="px-4 py-2">Label</th>
+                      <th className="px-4 py-2">Field Key</th>
+                      <th className="px-4 py-2">Tipo</th>
+                      <th className="px-4 py-2">Origen</th>
+                      <th className="px-4 py-2">Requerido</th>
+                      <th className="px-4 py-2">Activo</th>
+                      <th className="px-4 py-2">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>{renderFieldRows(systemFields)}</tbody>
                 </table>
               </div>
             </section>

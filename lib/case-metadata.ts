@@ -23,11 +23,30 @@ export type CaseFieldDefinition = {
   is_required: boolean | null;
   is_active: boolean | null;
   is_standard?: boolean | null;
+  storage_type?: "COLUMN" | "CUSTOM_VALUE" | "VIRTUAL" | null;
+  column_name?: string | null;
+  is_editable?: boolean | null;
+  is_filterable?: boolean | null;
+  is_list_visible?: boolean | null;
+  is_form_eligible?: boolean | null;
+  is_detail_eligible?: boolean | null;
+  is_system?: boolean | null;
+  sort_order?: number | null;
   picklist_values: string[] | null;
   default_value: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+export function isCustomValueCaseField(field: CaseFieldDefinition) {
+  return field.storage_type === "CUSTOM_VALUE" ||
+    (field.storage_type == null && field.is_standard !== true);
+}
+
+export function isColumnCaseField(field: CaseFieldDefinition) {
+  return field.storage_type === "COLUMN" ||
+    (field.storage_type == null && field.is_standard === true);
+}
 
 export type CaseLayoutTab = {
   id: string;

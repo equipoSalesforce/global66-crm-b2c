@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const [casesResult, definitionsResult] = await Promise.all([
     supabase.from("cases").select("id, case_number, customer_id, subject, status, lifecycle_status, routing_status, priority, channel, assigned_agent_id, assigned_to, created_at, updated_at, closed_at, area, category, contact_name, contact_email, contact_phone, contact_type").order("created_at", { ascending: false }).limit(200).returns<CaseReportRecord[]>(),
-    supabase.from("case_field_definitions").select("id, field_key, label, field_type, description, is_required, is_active, is_standard, picklist_values, default_value, created_at, updated_at").eq("is_active", true).order("field_key", { ascending: true }).returns<CaseFieldDefinition[]>(),
+    supabase.from("case_field_definitions").select("id, field_key, label, field_type, description, is_required, is_active, is_standard, storage_type, column_name, is_editable, is_filterable, is_list_visible, is_form_eligible, is_detail_eligible, is_system, sort_order, picklist_values, default_value, created_at, updated_at").eq("is_active", true).order("sort_order", { ascending: true }).order("field_key", { ascending: true }).returns<CaseFieldDefinition[]>(),
   ]);
 
   if (casesResult.error || definitionsResult.error) {

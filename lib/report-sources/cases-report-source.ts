@@ -1,4 +1,8 @@
-import type { CaseCustomValue, CaseFieldDefinition } from "../case-metadata";
+import {
+  isCustomValueCaseField,
+  type CaseCustomValue,
+  type CaseFieldDefinition,
+} from "../case-metadata";
 import type { ReportField, ReportFieldType, ReportSourceAdapter, ReportSourceRow } from "../informes-sources";
 
 export type CaseReportRecord = Record<string, string | number | boolean | null> & { id: string | number | null };
@@ -60,7 +64,7 @@ export function getCaseReportFields(definitions: CaseFieldDefinition[]): ReportF
       name: definition.field_key,
       label: definition.label || existing?.label || definition.field_key,
       type: mapFieldType(definition.field_type),
-      isCustom: definition.is_standard !== true,
+      isCustom: isCustomValueCaseField(definition),
       required: definition.is_required === true,
       description: definition.description,
     }));
@@ -69,7 +73,8 @@ export function getCaseReportFields(definitions: CaseFieldDefinition[]): ReportF
 }
 
 export function getCaseCustomFieldDefinitions(definitions: CaseFieldDefinition[]) {
-  return definitions.filter((definition) => definition.is_active !== false && definition.is_standard !== true);
+  return definitions.filter((definition) =>
+    definition.is_active !== false && isCustomValueCaseField(definition));
 }
 
 export function getCaseCustomValues(values: CaseCustomValue[]) {

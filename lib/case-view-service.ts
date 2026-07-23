@@ -7,6 +7,7 @@ import {
   type CaseResponseMessage,
   type CaseResponseStatus,
 } from "./case-response-status-service";
+import type { CaseFieldDefinition } from "./case-metadata";
 
 export type CaseViewMetricKey =
   | "total"
@@ -19,6 +20,7 @@ export type CaseViewMetricKey =
 
 export type CaseViewColumnKey =
   | "number"
+  | "subject"
   | "email"
   | "contactType"
   | "response"
@@ -37,6 +39,7 @@ export type CaseViewColumnKey =
 export type CaseViewRow = {
   id: string;
   number: string;
+  subject: string;
   email: string;
   channel: string;
   contactType: string;
@@ -138,6 +141,7 @@ export type CaseViewMessageRecord = CaseResponseMessage & {
 
 export const defaultCaseViewColumns: CaseViewData["columns"] = [
   { key: "number", label: "Número Caso" },
+  { key: "subject", label: "Asunto" },
   { key: "email", label: "Correo" },
   { key: "response", label: "Respuesta" },
   { key: "contactType", label: "Tipo de Contacto" },
@@ -153,6 +157,36 @@ export const defaultCaseViewColumns: CaseViewData["columns"] = [
   { key: "product", label: "Producto" },
   { key: "subproduct", label: "Subproducto" },
 ];
+
+const caseFieldKeyByViewColumn: Partial<Record<CaseViewColumnKey, string>> = {
+  number: "case_number",
+  subject: "subject",
+  email: "contact_email",
+  response: "response_status",
+  contactType: "contact_type",
+  catPrincipal: "area",
+  catSecondary: "category",
+  catExtra: "ai_category",
+  status: "lifecycle_status",
+  containmentContext: "resolution_type",
+  owner: "assigned_to",
+  priority: "priority",
+  isEdgeCase: "is_edge_case",
+  channel: "channel",
+  product: "product",
+  subproduct: "subproduct",
+};
+
+function columnsFromCaseFieldCatalog(definitions: CaseFieldDefinition[]) {
+  const byKey = new Map(definitions.map((field) => [field.field_key, field]));
+  return defaultCaseViewColumns.filter((column) => {
+    const definition = byKey.get(caseFieldKeyByViewColumn[column.key] ?? "");
+    return mandatoryCaseViewColumns.includes(column.key) || definition?.is_list_visible !== false;
+  }).map((column) => {
+    const definition = byKey.get(caseFieldKeyByViewColumn[column.key] ?? "");
+    return { ...column, label: definition?.label?.trim() || column.label };
+  });
+}
 
 export const mandatoryCaseViewColumns: CaseViewColumnKey[] = [
   "number",
@@ -263,6 +297,7 @@ function buildRows(cases: CaseRecord[], messages: CaseViewMessageRecord[]) {
       return {
         id,
         number: formatCaseNumber(caseItem.case_number, id),
+        subject: caseItem.subject || "Sin asunto",
         email: caseItem.customer?.email || caseItem.contact_email || "Sin correo",
         channel: caseItem.channel || "Sin canal",
         contactType: caseItem.contact_type || "Sin tipo",
@@ -453,7 +488,7 @@ export async function getCaseViewData(): Promise<{
     return { data: null, error: responseStatusError.message };
   }
 
-  const [casesResult, messagesResult] = await Promise.all([
+  const [casesResult, messagesResult, fieldsResult] = await Promise.all([
     supabase
       .from("cases")
       .select(
@@ -467,9 +502,15 @@ export async function getCaseViewData(): Promise<{
       .order("created_at", { ascending: false })
       .limit(1200)
       .returns<CaseViewMessageRecord[]>(),
+    supabase
+      .from("case_field_definitions")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .returns<CaseFieldDefinition[]>(),
   ]);
 
-  const error = casesResult.error?.message ?? messagesResult.error?.message ?? null;
+  const error = casesResult.error?.message ?? messagesResult.error?.message ?? fieldsResult.error?.message ?? null;
 
   if (error) return { data: null, error };
 
@@ -478,7 +519,7 @@ export async function getCaseViewData(): Promise<{
   return {
     data: {
       rows,
-      columns: defaultCaseViewColumns,
+      columns: columnsFromCaseFieldCatalog(fieldsResult.data ?? []),
     },
     error: null,
   };

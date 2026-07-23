@@ -167,6 +167,7 @@ function responseBadgeClass(status: CaseResponseStatus) {
 function getCellValue(row: CaseViewRow, column: CaseViewColumnKey) {
   const values: Record<CaseViewColumnKey, string> = {
     number: row.number,
+    subject: row.subject,
     email: row.email,
     contactType: row.contactType,
     response: getCaseResponseLabel(row.responseStatus),

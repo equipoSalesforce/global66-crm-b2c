@@ -5,6 +5,7 @@ import { createCaseAuditEvents } from "@/lib/case-audit";
 import { generateNextCaseNumber } from "@/lib/case-number";
 import {
   buildCustomValuePayload,
+  isCustomValueCaseField,
   validateCustomFieldValue,
   type CaseFieldDefinition,
 } from "@/lib/case-metadata";
@@ -118,12 +119,17 @@ async function buildDuplicateCustomValues(
   const uniqueInputs = [...new Map(inputs.map((input) => [input.fieldDefinitionId, input])).values()];
   const { data: fields, error } = await supabase
     .from("case_field_definitions")
-    .select("id, field_key, label, field_type, description, is_required, is_active, is_standard, picklist_values, default_value")
+    .select("id, field_key, label, field_type, description, is_required, is_active, is_standard, storage_type, column_name, is_editable, is_filterable, is_list_visible, is_form_eligible, is_detail_eligible, is_system, sort_order, picklist_values, default_value")
     .in("id", uniqueInputs.map((input) => input.fieldDefinitionId))
     .eq("is_active", true)
     .returns<CaseFieldDefinition[]>();
   if (error) throw error;
-  if ((fields ?? []).length !== uniqueInputs.length) throw new Error("Uno o más campos dinámicos no son válidos.");
+  if (
+    (fields ?? []).length !== uniqueInputs.length ||
+    (fields ?? []).some((field) => !isCustomValueCaseField(field))
+  ) {
+    throw new Error("Uno o más campos dinámicos no son válidos.");
+  }
 
   const fieldsById = new Map((fields ?? []).map((field) => [field.id, field]));
   return uniqueInputs.map((input) => {

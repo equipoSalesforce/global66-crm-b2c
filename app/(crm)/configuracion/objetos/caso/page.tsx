@@ -25,6 +25,7 @@ export default async function CaseObjectSettingsPage({
       supabase
         .from("case_field_definitions")
         .select("*")
+        .order("sort_order", { ascending: true })
         .order("field_key", { ascending: true })
         .returns<CaseFieldDefinition[]>(),
       supabase

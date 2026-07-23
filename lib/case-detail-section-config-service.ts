@@ -63,7 +63,7 @@ function toDetailFieldType(fieldType: CaseFieldType): CaseDetailFieldType {
 }
 
 function caseRegistryField(definition: CaseFieldDefinition): CaseDetailAvailableField {
-  const isEditable = !readOnlyCaseFields.has(definition.field_key);
+  const isEditable = definition.is_editable ?? !readOnlyCaseFields.has(definition.field_key);
   return {
     registryId: `CASE:${definition.field_key}`,
     fieldKey: definition.field_key,
@@ -77,6 +77,10 @@ function caseRegistryField(definition: CaseFieldDefinition): CaseDetailAvailable
     isRequired: Boolean(definition.is_required),
     isActive: definition.is_active !== false,
     caseDefinition: definition,
+    supportedViews: [
+      ...(definition.is_detail_eligible === false ? [] : ["SIDEBAR" as const]),
+      ...(definition.is_form_eligible === false ? [] : ["FORM" as const]),
+    ],
   };
 }
 
@@ -121,6 +125,8 @@ export async function listCaseDetailSectionConfiguration(
 
   const databaseCaseDefinitions = caseFieldsResult.data ?? [];
   const knownCaseFieldKeys = new Set(databaseCaseDefinitions.map((field) => field.field_key));
+  // Reparación temporal: permite resolver referencias antiguas mientras la migración
+  // 202607220004 registra todas las columnas CASE en case_field_definitions.
   const formReferencedCaseFields = (formLayoutsResult.data ?? []).flatMap((layout) => {
     const schema = normalizeCaseFormLayoutSchema(layout.layout_schema);
     if (schema) {

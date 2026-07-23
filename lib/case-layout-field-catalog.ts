@@ -86,7 +86,7 @@ export function buildCaseDetailLayoutCatalog(
         : field.sourceType === "CUSTOMER_PROFILE"
           ? "Los datos del cliente son de sólo lectura en el detalle."
           : "Este campo es de sólo lectura.",
-      supportedViews: ["SIDEBAR", "FORM"],
+      supportedViews: field.supportedViews ?? ["SIDEBAR", "FORM"],
       definition: field,
     }));
 
