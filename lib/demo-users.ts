@@ -1,4 +1,6 @@
 import { cookies } from "next/headers";
+import { isAuthOtpEnabled } from "@/lib/auth/auth-config";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/auth-session-service";
 import { supabase } from "./supabase";
 import type { CrmUserRole } from "./crm-users";
 
@@ -100,6 +102,22 @@ function toDemoUser(user: CrmUserRow): DemoUser {
 }
 
 export async function getCurrentDemoUser(): Promise<DemoUser> {
+  if (isAuthOtpEnabled()) {
+    const authenticatedUser = await getAuthenticatedUserFromCookies();
+    if (!authenticatedUser) {
+      throw new Error("No existe una sesión CRM válida.");
+    }
+    return {
+      id: authenticatedUser.id,
+      name: authenticatedUser.name,
+      email: authenticatedUser.email,
+      role: authenticatedUser.role,
+      teamId: normalizeTeamId(authenticatedUser.team ?? authenticatedUser.area),
+      teamName: authenticatedUser.team ?? authenticatedUser.area,
+      isAdmin: authenticatedUser.isAdmin,
+    };
+  }
+
   const cookieStore = await cookies();
   const userId = cookieStore.get(DEMO_USER_COOKIE)?.value;
 

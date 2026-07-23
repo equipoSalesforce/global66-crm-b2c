@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getNavigationItems } from "@/lib/permissions";
 import { clearDemoCrmSession } from "@/lib/crm-users";
@@ -135,6 +135,7 @@ function getBreadcrumbs(
 
 export function CrmShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, isChecking } = useCrmSession();
   const { permissions: rolePermissions } = useCrmPermissions();
   const [notificationCount, setNotificationCount] = useState(0);
@@ -181,8 +182,12 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
     });
   }
 
-  function logoutDemoUser() {
+  async function logoutDemoUser(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
     clearDemoCrmSession();
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    router.push("/login");
+    router.refresh();
   }
 
   useEffect(() => {

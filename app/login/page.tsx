@@ -1,10 +1,33 @@
+import { redirect } from "next/navigation";
+import { AuthOtpLogin } from "@/components/auth-otp-login";
 import { DemoLoginAgents } from "@/components/demo-login-agents";
+import { isAuthOtpEnabled } from "@/lib/auth/auth-config";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/auth-session-service";
 import type { CrmUser } from "@/lib/crm-users";
 import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  if (isAuthOtpEnabled()) {
+    const user = await getAuthenticatedUserFromCookies();
+    if (user) redirect("/dashboard");
+    const requestedNext = (await searchParams).next;
+    const nextPath =
+      requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
+        ? requestedNext
+        : "/dashboard";
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-100 px-6 py-12 text-gray-950">
+        <AuthOtpLogin nextPath={nextPath} />
+      </main>
+    );
+  }
+
   const { data, error } = await supabase
     .from("crm_users")
     .select("id, name, email, role, area, team, status, avatar_url, external_auth_provider, external_auth_id, last_login_at, created_at, updated_at")

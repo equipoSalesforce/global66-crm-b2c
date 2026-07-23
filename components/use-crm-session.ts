@@ -40,6 +40,52 @@ export function useCrmSession({ redirectInactive = true } = {}) {
     let isMounted = true;
 
     async function resolveSession() {
+      try {
+        const authResponse = await fetch("/api/auth/me", { cache: "no-store" });
+        const authPayload = (await authResponse.json()) as {
+          enabled?: boolean;
+          user?: CrmUserSessionRow | null;
+        };
+
+        if (authPayload.enabled) {
+          if (!isMounted) return;
+          if (!authResponse.ok || !authPayload.user) {
+            clearDemoCrmSession();
+            if (redirectInactive) router.replace("/login");
+            setState({
+              user: null,
+              isChecking: false,
+              warning: "No hay una sesión CRM activa.",
+            });
+            return;
+          }
+
+          clearDemoCrmSession();
+          setState({
+            user: {
+              id: authPayload.user.id,
+              name: authPayload.user.name,
+              email: authPayload.user.email,
+              role: normalizeCrmUserRole(authPayload.user.role),
+              area: authPayload.user.area,
+              team: authPayload.user.team,
+              status: normalizeCrmUserStatus(authPayload.user.status),
+            },
+            isChecking: false,
+            warning: null,
+          });
+          return;
+        }
+      } catch {
+        if (!isMounted) return;
+        setState({
+          user: null,
+          isChecking: false,
+          warning: "No se pudo validar la sesión CRM.",
+        });
+        return;
+      }
+
       const storedSession = getStoredDemoCrmSession();
 
       if (!storedSession) {
