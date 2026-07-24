@@ -295,7 +295,7 @@ export function EmailTemplatesAdmin() {
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(360px,1fr)_390px]">
         <aside className="grid content-start gap-4">
           <section className="rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white p-4 shadow-[var(--g66-shadow-card)]">
             <h2 className="flex items-center gap-2 text-sm font-black text-[var(--g66-text-primary)]">
@@ -380,7 +380,7 @@ export function EmailTemplatesAdmin() {
           </section>
         </aside>
 
-        <section className="grid gap-4">
+        <section className="grid gap-4 xl:contents">
           <div className="rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-white p-4 shadow-[var(--g66-shadow-card)]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

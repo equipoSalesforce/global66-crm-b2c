@@ -2,7 +2,8 @@
 
 import type { CaseCallRecord } from "@/lib/case-info-links-types";
 import { PhoneCall, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { ActivityIconBadge, ActivityListControls } from "./activity-event-ui";
 
 function formatCallDate(value: string | null) {
   if (!value) return "Sin fecha";
@@ -24,11 +25,58 @@ function isEffective(call: CaseCallRecord) {
 
 export function CaseCallsSection({ calls }: { calls: CaseCallRecord[] }) {
   const [selectedCall, setSelectedCall] = useState<CaseCallRecord | null>(null);
+  const [query, setQuery] = useState("");
+  const [date, setDate] = useState("");
+  const [order, setOrder] = useState<"newest" | "oldest">("newest");
+  const visibleCalls = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return calls
+      .filter((call) => {
+        const searchable = [
+          call.aircall_user_name,
+          call.aircall_user_email,
+          call.customer_phone,
+          call.phone_number,
+          call.status,
+          call.result,
+          call.notes,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        const timestamp = call.started_at || call.created_at;
+        const parsed = timestamp ? new Date(timestamp) : null;
+        const localDate =
+          parsed && !Number.isNaN(parsed.getTime())
+            ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`
+            : "";
+        return (
+          (!normalizedQuery || searchable.includes(normalizedQuery)) &&
+          (!date || localDate === date)
+        );
+      })
+      .sort((left, right) => {
+        const leftTime = new Date(left.started_at || left.created_at || 0).getTime() || 0;
+        const rightTime = new Date(right.started_at || right.created_at || 0).getTime() || 0;
+        return order === "newest" ? rightTime - leftTime : leftTime - rightTime;
+      });
+  }, [calls, date, order, query]);
 
   return (
     <>
       <div className="grid gap-2">
-        {calls.map((call) => (
+        <ActivityListControls
+          query={query}
+          onQueryChange={setQuery}
+          date={date}
+          onDateChange={setDate}
+          order={order}
+          onOrderChange={setOrder}
+          placeholder="Buscar en llamados..."
+          visibleCount={visibleCalls.length}
+          totalCount={calls.length}
+        />
+        {visibleCalls.map((call) => (
           <button
             key={call.id}
             type="button"
@@ -44,17 +92,23 @@ export function CaseCallsSection({ calls }: { calls: CaseCallRecord[] }) {
                 {isEffective(call) ? "Efectivo" : "No efectivo"}
               </span>
             </div>
-            <p className="mt-1 text-[11px] text-[var(--g66-text-secondary)]">
-              {formatCallDate(call.started_at || call.created_at)}
-            </p>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <p className="text-[11px] text-[var(--g66-text-secondary)]">
+                {formatCallDate(call.started_at || call.created_at)}
+              </p>
+              <span className="flex items-center gap-1">
+                <ActivityIconBadge kind="channel" value="call" />
+                <ActivityIconBadge kind="actor" value={call.aircall_user_id || call.crm_user_id ? "agent" : "unknown"} />
+              </span>
+            </div>
             <p className="mt-1 truncate text-[11px] text-[var(--g66-text-muted)]">
               {call.notes || call.result || call.status || "Sin detalle adicional"}
             </p>
           </button>
         ))}
-        {calls.length === 0 ? (
+        {visibleCalls.length === 0 ? (
           <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">
-            No hay llamados asociados a este caso.
+            No encontramos llamados con esos filtros.
           </p>
         ) : null}
       </div>

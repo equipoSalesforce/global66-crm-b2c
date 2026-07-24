@@ -23,7 +23,6 @@ import {
   FileBarChart,
   Home,
   LayoutDashboard,
-  Mail,
   MessageCircle,
   Settings,
   ShieldCheck,
@@ -42,10 +41,8 @@ const navigationIconByHref: Record<string, LucideIcon> = {
   "/clientes": UsersRound,
   "/cuentas": UsersRound,
   "/agentes": UserRoundCheck,
-  "/conversaciones": MessageCircle,
-  "/casos?channel=GMAIL": Mail,
+  "/comunicaciones": MessageCircle,
   "/logs-ia": Sparkles,
-  "/mi-ia": Sparkles,
   "/configuracion/ia": ShieldCheck,
   "/sla": BarChart3,
   "/base-conocimiento": BookOpen,
@@ -126,8 +123,11 @@ function getBreadcrumbs(
       ? [{ label: "Cuentas" }]
       : [{ label: "Cuentas", href: "/cuentas" }, { label: "Cliente" }];
   }
-  if (pathname === "/mi-ia") {
-    return [{ label: "IA" }, { label: "Mi perfil IA" }];
+  if (pathname === "/mi-perfil") {
+    return [{ label: "Mi perfil" }];
+  }
+  if (pathname === "/comunicaciones") {
+    return [{ label: "Comunicaciones" }];
   }
 
   return [{ label: fallbackLabel }];
@@ -136,7 +136,7 @@ function getBreadcrumbs(
 export function CrmShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isChecking } = useCrmSession();
+  const { user, isChecking, authEnabled } = useCrmSession();
   const { permissions: rolePermissions } = useCrmPermissions();
   const [notificationCount, setNotificationCount] = useState(0);
   const [caseBreadcrumbNumber, setCaseBreadcrumbNumber] = useState<string | null>(null);
@@ -320,10 +320,12 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
               })}
             </nav>
 
-            <div
+            <Link
+              href="/mi-perfil"
               className={`mt-auto rounded-[var(--g66-radius-lg)] border border-[var(--g66-border)] bg-[var(--g66-surface-soft)] ${
                 isSidebarCompact ? "p-2" : "p-3"
-              }`}
+              } transition hover:border-[var(--g66-secondary-interactive)] hover:bg-[var(--g66-brand-blue-soft)]`}
+              title="Mi perfil"
             >
               <div
                 className={`flex items-center ${
@@ -335,17 +337,19 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                 </span>
                 <div className={isSidebarCompact ? "hidden" : "min-w-0"}>
                   <p className="text-xs font-black text-[var(--g66-text-primary)]">
-                    Sesión demo
+                    {agentName}
                   </p>
                   <p className="mt-1 truncate text-xs font-semibold text-[var(--g66-text-secondary)]">
-                    {agentName} · {agentRole}
+                    {agentRole} · Mi perfil
                   </p>
                 </div>
               </div>
+            </Link>
+            <div className="mt-2">
               <button
                 type="button"
                 onClick={toggleSidebarCollapsed}
-                className={`mt-3 flex h-8 w-full items-center justify-center rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white text-xs font-black text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-brand-blue)] hover:text-[var(--g66-brand-blue)] ${
+                className={`flex h-8 w-full items-center justify-center rounded-[var(--g66-radius-sm)] border border-[var(--g66-border)] bg-white text-xs font-black text-[var(--g66-text-secondary)] transition hover:border-[var(--g66-secondary-interactive)] hover:text-[var(--g66-secondary-interactive)] ${
                   isSidebarCompact ? "px-0" : "px-3"
                 }`}
                 title={sidebarCollapsed ? "Expandir sidebar" : "Colapsar sidebar"}
@@ -422,13 +426,15 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                 <DemoAvailabilitySelect userId={agentId} compact showLabel={false} bare />
               </div>
             ) : null}
-            <Link
-              href="/login"
-              onClick={logoutDemoUser}
-              className={`${originalStyles.changeUser} whitespace-nowrap text-[var(--g66-brand-blue)] hover:underline`}
-            >
-              Cambiar usuario
-            </Link>
+            {!isChecking && !authEnabled ? (
+              <Link
+                href="/login"
+                onClick={logoutDemoUser}
+                className={`${originalStyles.changeUser} whitespace-nowrap text-[var(--g66-brand-blue)] hover:text-[var(--g66-secondary-interactive)] hover:underline`}
+              >
+                Cambiar usuario
+              </Link>
+            ) : null}
             <span className="h-8 w-px bg-[var(--g66-border)]" aria-hidden="true" />
             <div className={`${originalStyles.currentUser} flex min-w-0 items-center`}>
               <span className={`${originalStyles.currentUserAvatar} flex shrink-0 items-center justify-center bg-[var(--g66-brand-blue)] text-white`}>

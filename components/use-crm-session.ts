@@ -16,6 +16,7 @@ type SessionState = {
   user: DemoCrmSession | null;
   isChecking: boolean;
   warning: string | null;
+  authEnabled: boolean;
 };
 
 type CrmUserSessionRow = {
@@ -34,6 +35,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
     user: null,
     isChecking: true,
     warning: null,
+    authEnabled: false,
   });
 
   useEffect(() => {
@@ -56,6 +58,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
               user: null,
               isChecking: false,
               warning: "No hay una sesión CRM activa.",
+              authEnabled: true,
             });
             return;
           }
@@ -73,6 +76,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
             },
             isChecking: false,
             warning: null,
+            authEnabled: true,
           });
           return;
         }
@@ -82,6 +86,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
           user: null,
           isChecking: false,
           warning: "No se pudo validar la sesión CRM.",
+          authEnabled: false,
         });
         return;
       }
@@ -95,6 +100,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
             user: null,
             isChecking: false,
             warning: "No hay sesión demo activa.",
+            authEnabled: false,
           });
         }
         return;
@@ -131,12 +137,13 @@ export function useCrmSession({ redirectInactive = true } = {}) {
             user: null,
             isChecking: false,
             warning: "El usuario interno está inactivo.",
+            authEnabled: false,
           });
           return;
         }
 
         persistDemoCrmSession(resolvedSession);
-        setState({ user: resolvedSession, isChecking: false, warning: null });
+        setState({ user: resolvedSession, isChecking: false, warning: null, authEnabled: false });
         return;
       }
 
@@ -145,6 +152,7 @@ export function useCrmSession({ redirectInactive = true } = {}) {
         user: storedSession,
         isChecking: false,
         warning: "El usuario no existe en crm_users. Usando fallback demo.",
+        authEnabled: false,
       });
     }
 

@@ -1,7 +1,5 @@
-import { AiProfileDashboard } from "@/components/ai-profile-dashboard";
-
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
 
 export default function MyAiPage() {
-  return <AiProfileDashboard />;
+  redirect("/mi-perfil?tab=ai-preferences");
 }

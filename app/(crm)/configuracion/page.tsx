@@ -1,35 +1,11 @@
 import { PageHeader } from "@/components/page-header";
 import { PermissionAction } from "@/components/permission-action";
 import { RoleGuard } from "@/components/role-guard";
-import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-type AiSetting = Record<string, unknown>;
-
-function formatSettingValue(value: unknown) {
-  if (value === null || value === undefined) {
-    return "Sin valor";
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
-
-export default async function ConfiguracionPage() {
-  const { data, error } = await supabase
-    .from("ai_settings")
-    .select("*")
-    .limit(1)
-    .returns<AiSetting[]>();
-
-  const settings = data?.[0] ?? null;
-  const entries = settings ? Object.entries(settings) : [];
-
+export default function ConfiguracionPage() {
   return (
     <>
       <PageHeader
@@ -114,6 +90,20 @@ export default async function ConfiguracionPage() {
           </section>
 
           <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-gray-950">Gobierno IA</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              Administra límites, excepciones y controles de uso de IA por
+              ejecutivo y funcionalidad.
+            </p>
+            <Link
+              href="/configuracion/ia"
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-semibold text-white hover:bg-[var(--g66-secondary-interactive)]"
+            >
+              Abrir Gobierno IA
+            </Link>
+          </section>
+
+          <section className="rounded-lg border border-[var(--g66-border)] bg-white p-6 shadow-sm">
             <h2 className="text-lg font-bold text-gray-950">
               Automatización operacional
             </h2>
@@ -138,7 +128,7 @@ export default async function ConfiguracionPage() {
               por defecto para respuestas sugeridas por IA.
             </p>
             <Link
-              href="/configuracion/templates-correo"
+              href="/comunicaciones?tab=email-templates"
               className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-semibold text-white hover:bg-[var(--g66-accent-cyan)]"
             >
               Gestionar templates
@@ -151,42 +141,13 @@ export default async function ConfiguracionPage() {
               Administra respuestas reutilizables para el composer de WhatsApp.
             </p>
             <Link
-              href="/configuracion/mensajes-rapidos"
+              href="/comunicaciones?tab=quick-messages"
               className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[var(--g66-brand-blue)] px-4 text-sm font-semibold text-white hover:bg-[var(--g66-accent-cyan)]"
             >
               Gestionar mensajes rápidos
             </Link>
           </section>
 
-        <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-lg font-bold text-gray-950">Configuración IA</h2>
-          </div>
-
-          {error ? (
-            <p className="p-6 text-sm text-[var(--g66-danger)]">
-              No se pudo cargar la configuración IA.
-            </p>
-          ) : settings ? (
-            <dl className="divide-y divide-gray-200">
-              {entries.map(([key, value]) => (
-                <div
-                  key={key}
-                  className="grid gap-2 px-6 py-4 sm:grid-cols-[220px_1fr]"
-                >
-                  <dt className="text-sm font-semibold text-gray-950">{key}</dt>
-                  <dd className="break-words text-sm leading-6 text-gray-600">
-                    {formatSettingValue(value)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="p-6 text-sm text-gray-600">
-              No hay configuración IA registrada.
-            </p>
-          )}
-        </section>
         </div>
       </RoleGuard>
     </>

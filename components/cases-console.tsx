@@ -94,6 +94,12 @@ import { CaseReplyForm } from "./case-reply-form";
 import { CaseEmailComposer } from "./cases/case-email-composer";
 import { AircallPhoneWidget } from "./aircall-phone-widget";
 import { CaseCallsSection } from "./cases/case-calls-section";
+import {
+  ActivityIconBadge,
+  ActivityListControls,
+  type ActivityActor,
+  type ActivityChannel,
+} from "./cases/activity-event-ui";
 import { CaseAttentionTime } from "./cases/case-attention-time";
 import { CaseInfoLinksPanel } from "./cases/case-info-links-panel";
 import {
@@ -300,7 +306,6 @@ type WorkTab = "whatsapp" | "ticket" | "ai" | "activity" | "history" | "form";
 type TicketTab = "publish" | "details" | "activity" | "history" | `layout:${string}`;
 type PendingAction =
   | "status"
-  | "close"
   | "email"
   | "email-sync"
   | "macro"
@@ -567,6 +572,58 @@ function formatRelativeTime(date: string | null | undefined) {
   return `hace ${days} d`;
 }
 
+function matchesActivityDate(value: string | null | undefined, date: string) {
+  if (!date) return true;
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}` === date;
+}
+
+function sortByActivityDate<T>(
+  items: T[],
+  getDate: (item: T) => string | null | undefined,
+  order: "newest" | "oldest",
+) {
+  return [...items].sort((left, right) => {
+    const leftTime = new Date(getDate(left) ?? 0).getTime() || 0;
+    const rightTime = new Date(getDate(right) ?? 0).getTime() || 0;
+    return order === "newest" ? rightTime - leftTime : leftTime - rightTime;
+  });
+}
+
+function getMessageActivityChannel(message: ConsoleMessageRecord): ActivityChannel {
+  const value = `${message.channel ?? ""} ${message.message_type ?? ""}`.toLowerCase();
+  if (value.includes("email") || value.includes("gmail") || value.includes("ticket")) return "email";
+  if (value.includes("call") || value.includes("aircall") || value.includes("phone")) return "call";
+  if (value.includes("chat") || value.includes("webchat")) return "chat";
+  if (value.includes("social") || value.includes("rrss")) return "rrss";
+  if (value.includes("whatsapp") || !value.trim()) return "whatsapp";
+  return "system";
+}
+
+function getMessageActivityActor(message: ConsoleMessageRecord): ActivityActor {
+  const sender = message.sender_type?.toLowerCase() ?? "";
+  const direction = message.direction?.toLowerCase() ?? "";
+  if (sender.includes("ai") || sender.includes("bot")) return "ai";
+  if (sender.includes("customer") || sender.includes("client") || direction === "inbound") return "customer";
+  if (sender.includes("agent") || sender.includes("executive") || direction === "outbound") return "agent";
+  if (sender.includes("admin") || sender.includes("system")) return "system";
+  return "unknown";
+}
+
+function getAuditActivityActor(event: CaseAuditEvent): ActivityActor {
+  const value = `${event.actor_role ?? ""} ${event.source ?? ""}`.toLowerCase();
+  if (value.includes("ai")) return "ai";
+  if (value.includes("agent") || value.includes("executive")) return "agent";
+  if (event.actor_user_id || event.actor_name || event.actor_email) return "agent";
+  return "system";
+}
+
 function getDaysWithoutOperation(date: string | null | undefined) {
   if (!date) return null;
 
@@ -746,9 +803,13 @@ function AuditEventCard({
             {event.actor_role || "Sin rol"} · {event.source || "case_detail"}
           </p>
         </div>
-        <span className="shrink-0 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
-          {formatDateTime(event.created_at)}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="mr-1 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
+            {formatDateTime(event.created_at)}
+          </span>
+          <ActivityIconBadge kind="channel" value="system" />
+          <ActivityIconBadge kind="actor" value={getAuditActivityActor(event)} />
+        </div>
       </div>
     </article>
   );
@@ -835,9 +896,13 @@ function AircallCallCard({ call }: { call: CaseCallRecord }) {
               ))}
           </div>
         </div>
-        <span className="shrink-0 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
-          {formatDateTime(call.started_at || call.created_at)}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="mr-1 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
+            {formatDateTime(call.started_at || call.created_at)}
+          </span>
+          <ActivityIconBadge kind="channel" value="call" />
+          <ActivityIconBadge kind="actor" value={call.aircall_user_id || call.crm_user_id ? "agent" : "unknown"} />
+        </div>
       </div>
     </article>
   );
@@ -1641,36 +1706,6 @@ function getLastActivity(
   return message?.created_at ?? caseItem.updated_at ?? caseItem.created_at;
 }
 
-function getTimeWithoutResponse(messages: ConsoleMessageRecord[]) {
-  const latestInbound = [...messages]
-    .reverse()
-    .find((message) => {
-      const sender = message.sender_type?.toUpperCase() ?? "";
-      const direction = message.direction?.toUpperCase() ?? "";
-
-      return sender === "CUSTOMER" || direction === "INBOUND";
-    });
-  const latestOutbound = [...messages]
-    .reverse()
-    .find((message) => {
-      const sender = message.sender_type?.toUpperCase() ?? "";
-      const direction = message.direction?.toUpperCase() ?? "";
-
-      return sender === "AGENT" || sender === "AI" || direction === "OUTBOUND";
-    });
-
-  if (!latestInbound?.created_at) return "Sin mensajes entrantes";
-
-  const inboundTime = new Date(latestInbound.created_at).getTime();
-  const outboundTime = latestOutbound?.created_at
-    ? new Date(latestOutbound.created_at).getTime()
-    : 0;
-
-  if (outboundTime > inboundTime) return "Al día";
-
-  return formatRelativeTime(latestInbound.created_at);
-}
-
 function uniqueValues(
   cases: ConsoleCaseRecord[],
   key: "status" | "priority" | "channel",
@@ -2078,6 +2113,12 @@ export function CasesConsole({
   >([]);
   const [whatsappPendingCount, setWhatsappPendingCount] = useState(0);
   const [relatedView, setRelatedView] = useState<CaseInfoLinkView | null>(null);
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityDate, setActivityDate] = useState("");
+  const [activityOrder, setActivityOrder] = useState<"newest" | "oldest">("oldest");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyDate, setHistoryDate] = useState("");
+  const [historyOrder, setHistoryOrder] = useState<"newest" | "oldest">("newest");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -2112,7 +2153,6 @@ export function CasesConsole({
     rolePermissions,
   );
   const canTakeCases = hasPermission(role, "takeQueueCases", rolePermissions);
-  const canCloseCases = hasPermission(role, "closeCases", rolePermissions);
   const canRespondToCustomers = hasPermission(
     role,
     "respondToCustomers",
@@ -3045,6 +3085,98 @@ export function CasesConsole({
     return !channel || channel === "WHATSAPP" || channel === "AI";
   });
   const selectedEmailMessages = selectedCaseMessages.filter(isEmailMessage);
+  const normalizedActivityQuery = activityQuery.trim().toLocaleLowerCase();
+  const filteredActivityMessages = sortByActivityDate(
+    selectedCaseMessages.filter((message) => {
+      const searchable = [
+        message.sender_type,
+        message.direction,
+        message.channel,
+        message.email_subject,
+        message.email_from,
+        message.email_to,
+        message.body,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
+      return (
+        (!normalizedActivityQuery || searchable.includes(normalizedActivityQuery)) &&
+        matchesActivityDate(message.created_at, activityDate)
+      );
+    }),
+    (message) => message.created_at,
+    activityOrder,
+  );
+  const filteredActivityCalls = sortByActivityDate(
+    aircallCalls.filter((call) => {
+      const searchable = [
+        call.aircall_user_name,
+        call.aircall_user_email,
+        call.customer_phone,
+        call.phone_number,
+        call.status,
+        call.result,
+        call.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
+      return (
+        (!normalizedActivityQuery || searchable.includes(normalizedActivityQuery)) &&
+        matchesActivityDate(call.started_at || call.created_at, activityDate)
+      );
+    }),
+    (call) => call.started_at || call.created_at,
+    activityOrder,
+  );
+  const normalizedHistoryQuery = historyQuery.trim().toLocaleLowerCase();
+  const filteredAuditEvents = sortByActivityDate(
+    auditEvents.filter((event) => {
+      const searchable = [
+        getAuditActionLabel(event),
+        event.actor_name,
+        event.actor_email,
+        event.actor_role,
+        event.source,
+        event.field_label,
+        event.field_key,
+        event.old_value,
+        event.new_value,
+        event.metadata ? JSON.stringify(event.metadata) : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
+      return (
+        (!normalizedHistoryQuery || searchable.includes(normalizedHistoryQuery)) &&
+        matchesActivityDate(event.created_at, historyDate)
+      );
+    }),
+    (event) => event.created_at,
+    historyOrder,
+  );
+  const filteredActivityAuditEvents = sortByActivityDate(
+    auditEvents.filter((event) => {
+      const searchable = [
+        getAuditActionLabel(event),
+        event.actor_name,
+        event.actor_email,
+        event.actor_role,
+        event.source,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
+      return (
+        (!normalizedActivityQuery || searchable.includes(normalizedActivityQuery)) &&
+        matchesActivityDate(event.created_at, activityDate)
+      );
+    }),
+    (event) => event.created_at,
+    activityOrder,
+  );
+  const filteredEmailMessages = filteredActivityMessages.filter(isEmailMessage);
   const normalizedWhatsappSearchQuery = whatsappSearchQuery.trim().toLocaleLowerCase();
   const whatsappSearchMatches = normalizedWhatsappSearchQuery
     ? selectedWhatsappMessages.filter((message) =>
@@ -3823,22 +3955,6 @@ export function CasesConsole({
     router.refresh();
   }
 
-  async function closeCase() {
-    if (!selectedCase || !canCloseCases || pendingAction) return;
-
-    setPendingAction("close");
-    await updateCase(
-      {
-        status: "CLOSED",
-        lifecycle_status: "CLOSED",
-        closed_at: new Date().toISOString(),
-        resolution_type: selectedCase.resolution_type || "HUMAN_RESOLVED",
-      },
-      "✓ Caso cerrado correctamente",
-    );
-    setPendingAction(null);
-  }
-
   async function saveTicketForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedCase || !canEditCaseFields || pendingAction) return;
@@ -4326,17 +4442,13 @@ export function CasesConsole({
                 <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                 Duplicar
               </button>
-              {canCloseCases ? (
-                <button
-                  type="button"
-                  disabled={pendingAction !== null}
-                  onClick={closeCase}
-                  className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[#f4c6cf] bg-[var(--g66-danger-soft)] text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)] disabled:cursor-not-allowed disabled:bg-[var(--g66-border)]`}
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                  {pendingAction === "close" ? "Cerrando..." : "Cerrar"}
-                </button>
-              ) : null}
+              <Link
+                href="/casos"
+                className={`${originalStyles.headerAction} inline-flex items-center justify-center whitespace-nowrap border border-[#f4c6cf] bg-[var(--g66-danger-soft)] text-[var(--g66-danger)] transition hover:border-[var(--g66-danger)]`}
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Cerrar vista
+              </Link>
             </div>
           </div>
 
@@ -5226,16 +5338,27 @@ export function CasesConsole({
 
                     {workTab === "activity" ? (
                       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3">
+                        <ActivityListControls
+                          query={activityQuery}
+                          onQueryChange={setActivityQuery}
+                          date={activityDate}
+                          onDateChange={setActivityDate}
+                          order={activityOrder}
+                          onOrderChange={setActivityOrder}
+                          placeholder="Buscar en actividades..."
+                          visibleCount={filteredActivityMessages.length + filteredActivityCalls.length}
+                          totalCount={selectedCaseMessages.length + aircallCalls.length}
+                        />
                         <div className="grid gap-2">
                           {canViewCallHistory
-                            ? aircallCalls.map((call) => (
+                            ? filteredActivityCalls.map((call) => (
                                 <AircallCallCard
                                   key={`activity-aircall-${call.id}`}
                                   call={call}
                                 />
                               ))
                             : null}
-                          {selectedCaseMessages.map((message) => {
+                          {filteredActivityMessages.map((message) => {
                             const sender = message.sender_type?.toUpperCase() ?? "";
                             const direction = message.direction?.toUpperCase() ?? "";
                             const emailMessage = isEmailMessage(message);
@@ -5256,9 +5379,13 @@ export function CasesConsole({
                                   <p className="text-xs font-bold text-[var(--g66-text-primary)]">
                                     {title}
                                   </p>
-                                  <span className="shrink-0 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
-                                    {formatDateTime(message.created_at)}
-                                  </span>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    <span className="mr-1 text-[11px] font-semibold text-[var(--g66-text-secondary)]">
+                                      {formatDateTime(message.created_at)}
+                                    </span>
+                                    <ActivityIconBadge kind="channel" value={getMessageActivityChannel(message)} />
+                                    <ActivityIconBadge kind="actor" value={getMessageActivityActor(message)} />
+                                  </div>
                                 </div>
                                 {emailMessage ? (
                                   <div className="mt-2 grid gap-1.5">
@@ -5299,12 +5426,10 @@ export function CasesConsole({
                               </article>
                             );
                           })}
-                          {selectedCaseMessages.length === 0 && aircallCalls.length === 0 ? (
-                            <div className="grid gap-2">
-                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay gestiones registradas.</p>
-                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay llamadas asociadas.</p>
-                              <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">No hay correos asociados.</p>
-                            </div>
+                          {filteredActivityMessages.length === 0 && filteredActivityCalls.length === 0 ? (
+                            <p className="rounded-md border border-dashed border-[var(--g66-border)] bg-white p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
+                              No encontramos actividades con esos filtros.
+                            </p>
                           ) : null}
                         </div>
                       </div>
@@ -5312,13 +5437,24 @@ export function CasesConsole({
 
                     {workTab === "history" ? (
                       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--g66-background)] p-3">
+                        <ActivityListControls
+                          query={historyQuery}
+                          onQueryChange={setHistoryQuery}
+                          date={historyDate}
+                          onDateChange={setHistoryDate}
+                          order={historyOrder}
+                          onOrderChange={setHistoryOrder}
+                          placeholder="Buscar en historial..."
+                          visibleCount={filteredAuditEvents.length}
+                          totalCount={auditEvents.length}
+                        />
                         <div className="grid gap-2 rounded-md border border-[var(--g66-border)] bg-white p-3 shadow-sm">
                           <Field label="Caso creado" value={formatDateTime(selectedCase.created_at)} />
                           <Field label="Última actualización" value={formatDateTime(selectedCase.updated_at)} />
                           <Field label="Caso cerrado" value={formatDateTime(selectedCase.closed_at)} />
-                          {auditEvents.length > 0 ? (
+                          {filteredAuditEvents.length > 0 ? (
                             <div className="mt-2 grid gap-2">
-                              {auditEvents.map((event) => (
+                              {filteredAuditEvents.map((event) => (
                                 <AuditEventCard
                                   key={`history-audit-${event.id}`}
                                   event={event}
@@ -5327,9 +5463,9 @@ export function CasesConsole({
                               ))}
                             </div>
                           ) : null}
-                          {auditEvents.length === 0 ? (
+                          {filteredAuditEvents.length === 0 ? (
                             <div className="rounded-md border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm font-semibold text-[var(--g66-text-secondary)]">
-                              No hay historial detallado de cambios para este caso todavía.
+                              No encontramos eventos de historial con esos filtros.
                             </div>
                           ) : null}
                         </div>
@@ -5641,31 +5777,6 @@ export function CasesConsole({
                 </div>
               </ModuleBox>
               <ModuleBox
-                title="Historial de casos del cliente"
-                icon={<History className="h-3.5 w-3.5" aria-hidden="true" />}
-              >
-                <div className="grid gap-1.5">
-                  {caseItems
-                    .filter((caseItem) => selectedCase.customer_id && caseItem.customer_id === selectedCase.customer_id)
-                    .map((caseItem) => (
-                      <Link key={caseItem.id} href={`/casos/${caseItem.id}`} className="rounded-md border border-[var(--g66-border-soft)] bg-[var(--g66-background)] p-1.5 text-[11px] font-medium text-[var(--g66-brand-blue)] hover:underline">
-                        {formatCaseNumber(caseItem.case_number, caseItem.id)} · {caseItem.subject || "Sin asunto"}
-                      </Link>
-                    ))}
-                  {!selectedCase.customer_id ? <p className="text-xs font-semibold text-[var(--g66-text-secondary)]">Cliente no relacionado.</p> : null}
-                </div>
-              </ModuleBox>
-              <ModuleBox
-                title="Información transaccional"
-                icon={<Activity className="h-3.5 w-3.5" aria-hidden="true" />}
-              >
-                <dl className="grid gap-2">
-                  <Field label="Tiempo sin respuesta" value={getTimeWithoutResponse(selectedCaseMessages)} />
-                  <Field label="Mensajes" value={selectedCaseMessages.length.toLocaleString("es-CL")} />
-                  <Field label="Última actividad" value={formatDateTime(selectedLastActivity)} />
-                </dl>
-              </ModuleBox>
-              <ModuleBox
                 title="Adjuntos"
                 icon={<Paperclip className="h-3.5 w-3.5" aria-hidden="true" />}
               >
@@ -5729,22 +5840,56 @@ export function CasesConsole({
       {relatedView && selectedCase ? (
         <CaseInfoLinksPanel view={relatedView} onClose={() => setRelatedView(null)}>
           <div className="grid gap-3">
+            {relatedView === "history" ? (
+              <ActivityListControls
+                query={historyQuery}
+                onQueryChange={setHistoryQuery}
+                date={historyDate}
+                onDateChange={setHistoryDate}
+                order={historyOrder}
+                onOrderChange={setHistoryOrder}
+                placeholder="Buscar en historial..."
+                visibleCount={filteredAuditEvents.length}
+                totalCount={auditEvents.length}
+              />
+            ) : null}
+            {relatedView === "activity" || relatedView === "email" ? (
+              <ActivityListControls
+                query={activityQuery}
+                onQueryChange={setActivityQuery}
+                date={activityDate}
+                onDateChange={setActivityDate}
+                order={activityOrder}
+                onOrderChange={setActivityOrder}
+                placeholder={relatedView === "email" ? "Buscar en correos..." : "Buscar en actividades..."}
+                visibleCount={
+                  relatedView === "email"
+                    ? filteredEmailMessages.length
+                    : filteredActivityMessages.length + filteredActivityAuditEvents.length + filteredActivityCalls.length
+                }
+                totalCount={
+                  relatedView === "email"
+                    ? selectedEmailMessages.length
+                    : selectedCaseMessages.length + auditEvents.length + aircallCalls.length
+                }
+              />
+            ) : null}
             {relatedView === "cases" ? (
               <CaseRelatedCasesSection caseId={selectedCase.id} />
             ) : null}
             {relatedView === "qa" ? <CaseQaNotesSection /> : null}
             {relatedView === "email" ? (
               <div className="grid gap-2">
-                {selectedEmailMessages.map((message) => (
+                {filteredEmailMessages.map((message) => (
                   <button key={`related-email-${message.id}`} type="button" onClick={() => setSelectedEmailMessage(message)} className="rounded-lg border border-[var(--g66-border)] bg-white p-3 text-left transition hover:border-[var(--g66-brand-blue)] hover:bg-[var(--g66-brand-blue-soft)]">
                     <span className="block truncate text-xs font-semibold text-[var(--g66-brand-blue)]">{message.email_subject || "Email sin asunto"}</span>
                     <span className="mt-1 block truncate text-[10px] text-[var(--g66-text-secondary)]">De: {message.email_from || "Sin remitente"}</span>
                     <span className="block truncate text-[10px] text-[var(--g66-text-secondary)]">Para: {message.email_to || "Sin destinatario"}</span>
                     <span className="mt-1 line-clamp-2 block text-[11px] text-[var(--g66-text-secondary)]">{message.body || message.email_text_body || "Sin contenido"}</span>
-                    <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--g66-text-muted)]"><span>{formatDateTime(message.created_at)}</span><span>{message.delivery_status || "Sin estado"}</span></span>
+                    <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--g66-text-muted)]"><span>{message.delivery_status || "Sin estado"}</span><span className="flex items-center gap-1"><span className="mr-1">{formatDateTime(message.created_at)}</span><ActivityIconBadge kind="channel" value="email" /><ActivityIconBadge kind="actor" value={getMessageActivityActor(message)} /></span></span>
                   </button>
                 ))}
-                {selectedEmailMessages.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay correos asociados a este caso.</p> : null}
+                {filteredEmailMessages.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No encontramos correos con esos filtros.</p> : null}
               </div>
             ) : null}
             {relatedView === "ai" ? (
@@ -5773,16 +5918,16 @@ export function CasesConsole({
                 <Field label="Caso creado" value={formatDateTime(selectedCase.created_at)} />
                 <Field label="Última actualización" value={formatDateTime(selectedCase.updated_at)} />
                 <Field label="Caso cerrado" value={formatDateTime(selectedCase.closed_at)} />
-                {auditEvents.map((event) => <AuditEventCard key={`related-history-audit-${event.id}`} event={event} agentNames={agentNames} />)}
-                {auditEvents.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay eventos de historial para este caso.</p> : null}
+                {filteredAuditEvents.map((event) => <AuditEventCard key={`related-history-audit-${event.id}`} event={event} agentNames={agentNames} />)}
+                {filteredAuditEvents.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No encontramos eventos de historial con esos filtros.</p> : null}
               </div>
             ) : null}
             {relatedView === "activity" ? (
               <div className="grid gap-2">
-                {selectedCaseMessages.map((message) => <article key={`related-activity-message-${message.id}`} className="rounded-lg border border-[var(--g66-border)] bg-white p-3"><div className="flex items-start justify-between gap-2"><p className="text-xs font-semibold text-[var(--g66-text-primary)]">{isEmailMessage(message) ? getEmailTitle(message) : message.sender_type || message.direction || "Interacción"}</p><span className="text-[10px] text-[var(--g66-text-muted)]">{formatDateTime(message.created_at)}</span></div><p className="mt-1 line-clamp-2 text-xs text-[var(--g66-text-secondary)]">{message.body || "Sin contenido"}</p></article>)}
-                {auditEvents.map((event) => <AuditEventCard key={`related-activity-audit-${event.id}`} event={event} agentNames={agentNames} />)}
-                {canViewCallHistory ? aircallCalls.map((call) => <AircallCallCard key={`related-activity-call-${call.id}`} call={call} />) : null}
-                {selectedCaseMessages.length === 0 && auditEvents.length === 0 && (!canViewCallHistory || aircallCalls.length === 0) ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No hay actividad registrada para este caso.</p> : null}
+                {filteredActivityMessages.map((message) => <article key={`related-activity-message-${message.id}`} className="rounded-lg border border-[var(--g66-border)] bg-white p-3"><div className="flex items-start justify-between gap-2"><p className="text-xs font-semibold text-[var(--g66-text-primary)]">{isEmailMessage(message) ? getEmailTitle(message) : message.sender_type || message.direction || "Interacción"}</p><span className="flex items-center gap-1 text-[10px] text-[var(--g66-text-muted)]"><span className="mr-1">{formatDateTime(message.created_at)}</span><ActivityIconBadge kind="channel" value={getMessageActivityChannel(message)} /><ActivityIconBadge kind="actor" value={getMessageActivityActor(message)} /></span></div><p className="mt-1 line-clamp-2 text-xs text-[var(--g66-text-secondary)]">{message.body || "Sin contenido"}</p></article>)}
+                {filteredActivityAuditEvents.map((event) => <AuditEventCard key={`related-activity-audit-${event.id}`} event={event} agentNames={agentNames} />)}
+                {canViewCallHistory ? filteredActivityCalls.map((call) => <AircallCallCard key={`related-activity-call-${call.id}`} call={call} />) : null}
+                {filteredActivityMessages.length === 0 && filteredActivityAuditEvents.length === 0 && (!canViewCallHistory || filteredActivityCalls.length === 0) ? <p className="rounded-lg border border-dashed border-[var(--g66-border)] bg-[var(--g66-background)] p-3 text-sm text-[var(--g66-text-secondary)]">No encontramos actividades con esos filtros.</p> : null}
               </div>
             ) : null}
             {relatedView === "calls" ? <CaseCallsSection calls={aircallCalls} /> : null}

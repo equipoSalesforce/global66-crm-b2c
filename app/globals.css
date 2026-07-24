@@ -10,7 +10,8 @@
   --g66-brand-blue-border: rgb(var(--crm-primary-rgb) / 0.24);
   --g66-accent-green: #16C784;
   --g66-accent-green-soft: #E8FAF1;
-  --g66-accent-cyan: #21A8E8;
+  --g66-secondary-interactive: #4D80FF;
+  --g66-accent-cyan: var(--g66-secondary-interactive);
   --g66-accent-purple: #8B5CF6;
   --g66-accent-purple-soft: var(--g66-accent-purple-soft);
   --g66-success: #16C784;

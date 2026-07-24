@@ -35,7 +35,7 @@ function shortDate(value: string) {
   return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-export function AiProfileDashboard() {
+export function AiProfileDashboard({ embedded = false }: { embedded?: boolean }) {
   const [payload, setPayload] = useState<ProfilePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,10 +86,10 @@ export function AiProfileDashboard() {
   const maxTopic = Math.max(1, ...payload.topics.map((item) => item.uses));
   return (
     <div className="space-y-4 text-[13px]">
-      <header>
+      {!embedded ? <header>
         <h1 className="text-3xl font-black tracking-tight text-slate-950">Mi perfil IA</h1>
         <p className="mt-1 text-sm text-slate-600">Revisa cómo estás usando la IA, tus cupos disponibles y recomendaciones para mejorar tu gestión.</p>
-      </header>
+      </header> : null}
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
