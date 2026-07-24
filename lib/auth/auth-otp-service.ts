@@ -21,6 +21,7 @@ import {
   type AuthRequestContext,
 } from "@/lib/auth/auth-types";
 import type { CrmUserRole } from "@/lib/crm-users";
+import { ensureDefaultAiLimitsForUser } from "@/lib/ai-limit-provisioning-service";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type UserRow = {
@@ -453,6 +454,28 @@ export async function verifyOtpAndCreateSession(input: {
       "Tu usuario está desactivado. Contacta a Katherine.",
       403,
     );
+  }
+
+  const provisionedLimits = await ensureDefaultAiLimitsForUser({
+    userId: user.id,
+    role: user.role,
+    actorUserId: user.id,
+    reason: "Provisioning automático posterior a validación OTP.",
+  });
+  if (provisionedLimits.createdCount > 0) {
+    await recordAuditEvent({
+      actorUserId: user.id,
+      actorEmail: email,
+      action: "AI_LIMITS_PROVISIONED",
+      entityType: "crm_user",
+      entityId: user.id,
+      afterData: {
+        createdLimits: provisionedLimits.createdCount,
+        activeFeatures: provisionedLimits.totalActiveFeatures,
+      },
+      metadata: { source: "OTP_LOGIN" },
+      context: input.context,
+    });
   }
 
   const session = await createAuthSession(user.id, input.context);

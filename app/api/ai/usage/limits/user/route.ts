@@ -1,4 +1,9 @@
 import { getCurrentAiUser, requireAiAdmin } from "@/lib/ai-current-user";
+import {
+  logAiGovernanceError,
+  serializeAiGovernanceError,
+} from "@/lib/ai-governance-errors";
+import { ensureDefaultAiLimitsForUser } from "@/lib/ai-limit-provisioning-service";
 import { updateUserAiLimitsBatch } from "@/lib/ai-usage-control-service";
 import { supabase } from "@/lib/supabase";
 
@@ -12,6 +17,34 @@ type LimitInput = {
   temporaryLimitExpiresAt?: string | null;
   isActive?: boolean;
 };
+
+export async function POST(request: Request) {
+  try {
+    const admin = await getCurrentAiUser();
+    requireAiAdmin(admin);
+    const body = (await request.json()) as { userId?: string };
+    if (!body.userId) {
+      return Response.json(
+        { ok: false, error: "Usuario requerido." },
+        { status: 400 },
+      );
+    }
+
+    const result = await ensureDefaultAiLimitsForUser({
+      userId: body.userId,
+      actorUserId: admin.id,
+      reason: "Inicialización manual desde Gobierno IA.",
+    });
+    return Response.json({ ok: true, ...result });
+  } catch (error) {
+    logAiGovernanceError("POST /api/ai/usage/limits/user", error);
+    const message = serializeAiGovernanceError(error);
+    return Response.json(
+      { ok: false, error: message },
+      { status: message.includes("permisos") ? 403 : 500 },
+    );
+  }
+}
 
 export async function PATCH(request: Request) {
   try {
@@ -40,6 +73,11 @@ export async function PATCH(request: Request) {
     );
     if (invalid) return Response.json({ ok: false, error: "Los límites enviados no son válidos." }, { status: 400 });
 
+    await ensureDefaultAiLimitsForUser({
+      userId: targetUser.id,
+      actorUserId: admin.id,
+      reason: "Completado previo a edición desde Gobierno IA.",
+    });
     const limits = await updateUserAiLimitsBatch({
       targetUserId: targetUser.id,
       actorUserId: admin.id,
@@ -54,7 +92,8 @@ export async function PATCH(request: Request) {
     });
     return Response.json({ ok: true, updated: limits.length, limits });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudieron guardar los límites.";
+    logAiGovernanceError("PATCH /api/ai/usage/limits/user", error);
+    const message = serializeAiGovernanceError(error);
     return Response.json({ ok: false, error: message }, { status: message.includes("permisos") ? 403 : 500 });
   }
 }

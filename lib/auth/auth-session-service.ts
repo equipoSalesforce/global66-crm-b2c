@@ -66,17 +66,16 @@ async function loadSessionUser(userId: string): Promise<AuthenticatedCrmUser | n
   if (!user || normalizeCrmUserStatus(user.status) !== "ACTIVE") return null;
 
   const email = await resolveSessionEmail(user);
-  const isAdmin = isProfileAdminEmail(email);
   const storedRole = normalizeCrmUserRole(user.role);
   return {
     id: user.id,
     name: user.name,
     email,
-    role: isAdmin ? "ADMIN" : storedRole === "ADMIN" ? "AGENT" : storedRole,
+    role: storedRole,
     area: user.area,
     team: user.team,
     status: "ACTIVE",
-    isAdmin,
+    isAdmin: storedRole === "ADMIN",
   };
 }
 

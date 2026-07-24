@@ -1,4 +1,8 @@
 import { getCurrentAiUser, requireAiAdmin } from "@/lib/ai-current-user";
+import {
+  logAiGovernanceError,
+  serializeAiGovernanceError,
+} from "@/lib/ai-governance-errors";
 import { applyBulkAiLimits } from "@/lib/ai-usage-control-service";
 
 export const runtime = "nodejs";
@@ -13,8 +17,8 @@ export async function POST(request: Request) {
     const limits = await applyBulkAiLimits({ targetUserIds: [...new Set(body.targetUserIds)], actorUserId: user.id, limits: body.limits, reason: body.reason });
     return Response.json({ ok: true, updated: limits.length });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo aplicar la configuración masiva.";
+    logAiGovernanceError("POST /api/ai/usage/limits/bulk", error);
+    const message = serializeAiGovernanceError(error);
     return Response.json({ ok: false, error: message }, { status: message.includes("permisos") ? 403 : 500 });
   }
 }
-

@@ -112,6 +112,16 @@ export function AiGovernanceDashboard() {
   );
   const selectedUser = data?.users.find((user) => user.id === selectedUserId) ?? null;
   const selectedLimits = data?.limits.filter((limit) => limit.user_id === selectedUserId) ?? [];
+  const activeFeatureKeys = new Set(
+    data?.features
+      .filter((feature) => feature.is_active)
+      .map((feature) => feature.feature_key) ?? [],
+  );
+  const selectedActiveLimitCount = selectedLimits.filter((limit) =>
+    activeFeatureKeys.has(limit.feature_key),
+  ).length;
+  const selectedUserNeedsProvisioning =
+    Boolean(selectedUser) && selectedActiveLimitCount < activeFeatureKeys.size;
   const selectedHistory = data?.history.filter((event) => event.target_user_id === selectedUserId) ?? [];
 
   async function mutate(url: string, options: RequestInit, success: string) {
@@ -179,6 +189,15 @@ export function AiGovernanceDashboard() {
       setIsEditingUser(false);
       setUserDraft({});
     }
+  }
+
+  async function createBaseLimits() {
+    if (!selectedUserId) return;
+    await mutate(
+      "/api/ai/usage/limits/user",
+      { method: "POST", body: JSON.stringify({ userId: selectedUserId }) },
+      "Límites IA base creados correctamente.",
+    );
   }
 
   function useSelectedUserAsTemplate() {
@@ -301,8 +320,30 @@ export function AiGovernanceDashboard() {
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div><h2 className="text-base font-black">Límites por funcionalidad</h2><p className="text-xs text-slate-500">Los cambios se guardan únicamente al confirmar.</p></div>
-                {!isEditingUser ? <button onClick={startUserEditing} className="h-9 rounded-lg bg-blue-600 px-4 font-extrabold text-white">Editar límites</button> : <div className="flex gap-2"><button disabled={busy} onClick={cancelUserEditing} className="h-9 rounded-lg border px-4 font-extrabold text-slate-600">Cancelar</button><button disabled={busy} onClick={() => void saveUserLimits()} className="h-9 rounded-lg bg-blue-600 px-4 font-extrabold text-white disabled:opacity-50">{busy ? "Guardando..." : "Guardar cambios"}</button></div>}
+                {!isEditingUser ? (
+                  selectedUserNeedsProvisioning ? null : (
+                    <button onClick={startUserEditing} className="h-9 rounded-lg bg-blue-600 px-4 font-extrabold text-white">Editar límites</button>
+                  )
+                ) : <div className="flex gap-2"><button disabled={busy} onClick={cancelUserEditing} className="h-9 rounded-lg border px-4 font-extrabold text-slate-600">Cancelar</button><button disabled={busy} onClick={() => void saveUserLimits()} className="h-9 rounded-lg bg-blue-600 px-4 font-extrabold text-white disabled:opacity-50">{busy ? "Guardando..." : "Guardar cambios"}</button></div>}
               </div>
+              {selectedUserNeedsProvisioning ? (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <p className="font-bold text-amber-900">
+                    Este usuario aún no tiene límites IA configurados.
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">
+                    Crea o completa los límites base para todas las funcionalidades IA activas.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void createBaseLimits()}
+                    className="mt-3 h-9 rounded-lg bg-blue-600 px-4 font-extrabold text-white disabled:opacity-50"
+                  >
+                    {busy ? "Creando límites..." : "Crear límites base"}
+                  </button>
+                </div>
+              ) : (
               <div className="mt-3 overflow-x-auto rounded-lg border">
                 <table className="min-w-[820px] w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[10px] uppercase text-slate-500"><tr>{["Funcionalidad", "Diario", "Mensual", "Temporal diario", "Expira", "Estado"].map((label) => <th key={label} className="px-3 py-2 font-black">{label}</th>)}</tr></thead>
@@ -314,6 +355,7 @@ export function AiGovernanceDashboard() {
                   })}</tbody>
                 </table>
               </div>
+              )}
             </section>
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="text-base font-black">Historial de cambios</h2>

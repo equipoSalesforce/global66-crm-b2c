@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ensureDefaultAiLimitsForUser } from "@/lib/ai-limit-provisioning-service";
 import { supabase } from "@/lib/supabase";
 import type {
   AiFeature,
@@ -246,8 +247,16 @@ async function auditLimitChange(input: { targetUserId: string; actorUserId: stri
 }
 
 export async function updateUserAiLimit(input: { targetUserId: string; actorUserId: string; featureKey: string; dailyLimit?: number; monthlyLimit?: number; isActive?: boolean; reason?: string | null }) {
-  const previous = await getUserAiLimit(input.targetUserId, input.featureKey);
-  if (!previous) throw new Error("El usuario no tiene un límite configurado para esta funcionalidad.");
+  let previous = await getUserAiLimit(input.targetUserId, input.featureKey);
+  if (!previous) {
+    await ensureDefaultAiLimitsForUser({
+      userId: input.targetUserId,
+      actorUserId: input.actorUserId,
+      reason: "Completado automático previo a edición de límite.",
+    });
+    previous = await getUserAiLimit(input.targetUserId, input.featureKey);
+  }
+  if (!previous) throw new Error("No se pudo inicializar el límite para esta funcionalidad.");
   const update = { daily_limit: input.dailyLimit ?? previous.daily_limit, monthly_limit: input.monthlyLimit ?? previous.monthly_limit, is_active: input.isActive ?? previous.is_active, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from("ai_user_feature_limits").update(update).eq("id", previous.id).select("*").single<AiUserLimit>();
   if (error) throw asError(error, "No se pudo actualizar el límite IA.");
@@ -328,6 +337,11 @@ export async function updateUserAiLimitsBatch(input: {
 export async function applyBulkAiLimits(input: { targetUserIds: string[]; actorUserId: string; limits: Array<{ featureKey: string; dailyLimit: number; monthlyLimit: number; isActive?: boolean }>; reason?: string | null }) {
   const results = [];
   for (const targetUserId of input.targetUserIds) {
+    await ensureDefaultAiLimitsForUser({
+      userId: targetUserId,
+      actorUserId: input.actorUserId,
+      reason: "Completado automático previo a configuración masiva.",
+    });
     for (const limit of input.limits) results.push(await updateUserAiLimit({ targetUserId, actorUserId: input.actorUserId, featureKey: limit.featureKey, dailyLimit: limit.dailyLimit, monthlyLimit: limit.monthlyLimit, isActive: limit.isActive, reason: input.reason }));
   }
   return results;
@@ -336,6 +350,11 @@ export async function applyBulkAiLimits(input: { targetUserIds: string[]; actorU
 export async function createTemporaryAiLimit(input: { targetUserIds: string[]; actorUserId: string; featureKey: string; dailyLimit: number; expiresAt: string; reason?: string | null }) {
   const results = [];
   for (const targetUserId of input.targetUserIds) {
+    await ensureDefaultAiLimitsForUser({
+      userId: targetUserId,
+      actorUserId: input.actorUserId,
+      reason: "Completado automático previo a excepción temporal.",
+    });
     const previous = await getUserAiLimit(targetUserId, input.featureKey);
     if (!previous) throw new Error("El usuario no tiene un límite base configurado.");
     const { data, error } = await supabase.from("ai_user_feature_limits").update({ temporary_daily_limit: input.dailyLimit, temporary_expires_at: input.expiresAt, temporary_reason: input.reason ?? null, updated_at: new Date().toISOString() }).eq("id", previous.id).select("*").single<AiUserLimit>();
